@@ -1,5 +1,6 @@
 /DevLibrary/DevLibrary/obj/*
 /DevLibrary/.vs/DevLibrary/DesignTimeBuild/.dtbcache.v2
 /DevLibrary/.vs/DevLibrary/v16/*
-/DevLibrary/DevLibrary/bin/Debug/*
-/DevLibrary/DevLibrary/bin/Release/*
+/DevLibrary/DevLibrary/bin/*
+/DevLibrary/WinFormsLibrary/bin/*
+/DevLibrary/WinFormsLibrary/obj/*
