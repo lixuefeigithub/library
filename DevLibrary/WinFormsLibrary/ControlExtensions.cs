@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace WinFormsLibrary
+namespace WinFormLibrary
 {
     public static class ControlExtensions
     {

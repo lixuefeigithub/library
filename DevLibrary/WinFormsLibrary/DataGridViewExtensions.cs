@@ -6,7 +6,7 @@ using System.Linq.Dynamic.Core;
 using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 
-namespace WinFormsLibrary
+namespace WinFormLibrary
 {
     public static class DataGridViewExtensions
     {
