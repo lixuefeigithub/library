@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace LinqLibrary
 {
@@ -61,6 +62,39 @@ namespace LinqLibrary
 
             // apply composition of lambda expression bodies to parameters from the first expression 
             return Expression.Lambda<Func<TEntity, bool>>(Expression.NotEqual(first.Body, secondBody), first.Parameters);
+        }
+
+        public static Expression<Func<TEntity, bool>> Contains<TEntity, TProperty>(this Expression<Func<TEntity, TProperty>> expression, IEnumerable<TProperty> targetValues)
+        {
+            if (targetValues == null || !targetValues.Any())
+            {
+                return x => false;
+            }
+
+            ParameterExpression pe = expression.Parameters.Single();
+
+            Expression collection = Expression.Constant(targetValues);
+
+            Type cType = collection.Type.IsGenericType && collection.Type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+                                ? collection.Type
+                                : collection.Type.FindInterfaces((m, o) => m.IsGenericType
+                                        && m.GetGenericTypeDefinition() == typeof(IEnumerable<>), null)[0];
+
+            collection = Expression.Convert(collection, cType);
+
+            Type elemType = cType.GetGenericArguments()[0];
+
+            var methods = typeof(Enumerable).GetMethods()
+                .Where(m => m.Name == "Contains")
+                .Where(m => m.GetGenericArguments().Length == 1)
+                .Select(m => m.MakeGenericMethod(new[] { elemType }));
+
+            MethodInfo anyMethod = (MethodInfo)
+                Type.DefaultBinder.SelectMethod(BindingFlags.Static, methods.ToArray(), new[] { cType, typeof(TProperty) }, null);
+
+            var call = Expression.Call(anyMethod, collection, expression.Body);
+
+            return Expression.Lambda<Func<TEntity, bool>>(call, pe);
         }
 
         public static Expression<Func<TEntity, bool>> GreaterThan<TEntity, TProperty>(this Expression<Func<TEntity, TProperty>> first, Expression<Func<TEntity, TProperty>> second)
