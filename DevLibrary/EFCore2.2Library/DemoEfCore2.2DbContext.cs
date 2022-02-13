@@ -25,7 +25,6 @@ namespace EFCore2._2Library
 
             var methodInfoRight = typeof(DemoEfCoreDbContext).GetRuntimeMethod(nameof(Right), new[] { typeof(string), typeof(int) });
 
-#warning test left join
             modelBuilder
                 .HasDbFunction(methodInfoDatePart)
                 .HasTranslation(args => new SqlFunctionExpression(nameof(DatePart), typeof(int?), new[]
@@ -34,7 +33,6 @@ namespace EFCore2._2Library
                         args.ToArray()[1]
                         }));
 
-#warning not tested
             modelBuilder
                 .HasDbFunction(methodInfoRight)
                 .HasTranslation(args => new SqlFunctionExpression(nameof(Right), typeof(string), new[]
