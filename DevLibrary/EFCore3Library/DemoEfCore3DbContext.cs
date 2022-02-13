@@ -38,7 +38,6 @@ namespace EFCore3Library
                         type: typeof(int?),
                         typeMapping: null));
 
-#warning need to test
             modelBuilder
                 .HasDbFunction(methodInfoRight)
                 .HasTranslation(args => new SqlFunctionExpression(functionName: nameof(Right),

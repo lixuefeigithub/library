@@ -8,7 +8,7 @@ namespace LinqLibrary
     public static class QueryableExtensions
     {
         /// <summary>
-        /// Translatable to db query, please note that do not add selectors to right query
+        /// Not translatable in dot net 5
         /// </summary>
         /// <typeparam name="TLeftQuery">
         /// The type of the elements of the query on the left side
@@ -42,7 +42,8 @@ namespace LinqLibrary
         //     and a collection of matching elements from the second sequence.
         /// </param>
         /// <returns></returns>
-        public static IQueryable<TResult> LeftJoin<TLeftQuery, TRightQuery, TKey, TResult>(
+        [Obsolete]
+        public static IQueryable<TResult> LeftJoinDotNetCore22<TLeftQuery, TRightQuery, TKey, TResult>(
             this IQueryable<TLeftQuery> leftQuery,
             IQueryable<TRightQuery> rightQuery,
             Expression<Func<TLeftQuery, TKey>> leftQueryKeySelector,
@@ -68,6 +69,59 @@ namespace LinqLibrary
             return groupJoinQuery.SelectMany(x => x.RightInners, selectManyResultSelector);
         }
 
+        /// <summary>
+        /// Translatable to db query, please note that do not add selectors to right query
+        /// </summary>
+        /// <typeparam name="TLeftQuery">
+        /// The type of the elements of the query on the left side
+        /// </typeparam>
+        /// <typeparam name="TRightQuery">
+        /// The type of the elements of the query on the right side
+        /// </typeparam>
+        /// <typeparam name="TKey">
+        /// The type of the keys returned by the key selector functions.
+        /// </typeparam>
+        /// <param name="leftQuery">
+        /// A query on the left side of a left join query transaction
+        /// </param>
+        /// <param name="rightQuery">
+        /// A query on the right side of a left join query transaction
+        /// Do not Add selector to inner query. just use the entity query.
+        /// Like _dbContext.Users.AsQueryable() is good, _dbContext.Users.AsQueryable().Select(x => new {x.UserId, x.Name }) is bad
+        /// The selectors in inner query cannot be translated, it's good enough to add all your selectors to resultSelector.
+        /// </param>
+        /// <param name="leftQueryKeySelector">
+        /// A function to extract the join key from each element of the left sequence.
+        /// </param>
+        /// <param name="rightQueryKeySelector">
+        /// A function to extract the join key from each element of the right sequence.
+        /// </param>
+        /// <returns></returns>
+        public static IQueryable<LeftJoinResult<TLeftQuery, TRightQuery>> LeftJoin<TLeftQuery, TRightQuery, TKey>(
+            this IQueryable<TLeftQuery> leftQuery,
+            IQueryable<TRightQuery> rightQuery,
+            Expression<Func<TLeftQuery, TKey>> leftQueryKeySelector,
+            Expression<Func<TRightQuery, TKey>> rightQueryKeySelector)
+        {
+            var groupJoinQuery = leftQuery
+                .GroupJoin(rightQuery,
+                    leftQueryKeySelector,
+                    rightQueryKeySelector,
+                    (outerObj, inners) => new LeftJoinCollectionModel<TLeftQuery, TRightQuery>
+                    {
+                        LeftOuter = outerObj,
+                        RightInners = inners
+                    })
+                .SelectMany(s => s.RightInners.DefaultIfEmpty(),
+                    (s, righInner) => new LeftJoinResult<TLeftQuery, TRightQuery>
+                    {
+                        LeftOuter = s.LeftOuter,
+                        RightInner = righInner
+                    });
+
+            return groupJoinQuery;
+        }
+
         public static IQueryable<TSource> Or<TSource>(this IQueryable<TSource> source, Expression<Func<TSource, bool>> orCondition)
         {
             if (source == null)
@@ -87,6 +141,12 @@ namespace LinqLibrary
             }
 
             return source.Where(orCondition);
+        }
+
+        public class LeftJoinResult<TLeftOuter, TRightInner>
+        {
+            public TLeftOuter LeftOuter { get; set; }
+            public TRightInner RightInner { get; set; }
         }
 
         private class LeftJoinReplacer : ExpressionVisitor
