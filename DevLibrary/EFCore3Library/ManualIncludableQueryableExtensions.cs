@@ -17,7 +17,7 @@ namespace System.Linq
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNavigation> IncludeManyManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
+        public static ManualIncludableQueryable<TEntity, TNavigation> IncludeManyManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
             Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
             DbContext dbContext)
             where TEntity : class
@@ -28,7 +28,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = ManualIncludableQueryable<TEntity, TEntity, TNavigation>.CreateFirstOneToManyIncludeChainQuery(source,
+            var includableQuery = ManualIncludableQueryable<TEntity, TNavigation>.CreateFirstOneToManyIncludeChainQuery(source,
                 navigationPropertyPath,
                 dbContext);
 
@@ -39,19 +39,16 @@ namespace System.Linq
         /// Include one-to-many navigations
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TSecondLastNavigation"></typeparam>
         /// <typeparam name="TLastNavigation"></typeparam>
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="source"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeManyManually<TEntity, TSecondLastNavigation, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> source,
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyManually<TEntity, TLastNavigation, TNewNavigation>(
+            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
+            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
             where TEntity : class
-            where TSecondLastNavigation : class
             where TLastNavigation : class
             where TNewNavigation : class
         {
@@ -60,7 +57,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
@@ -74,10 +71,9 @@ namespace System.Linq
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeManyManually<TEntity, TNewNavigation>(
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyManually<TEntity, TNewNavigation>(
             this IManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
             where TEntity : class
             where TNewNavigation : class
         {
@@ -86,9 +82,21 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
+        }
+
+        public static IManualIncludableQueryable<TEntity> AsIManualIncludableQueryable<TEntity, TLastNavigation>(this ManualIncludableQueryable<TEntity, TLastNavigation> source)
+            where TEntity : class
+            where TLastNavigation : class
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            return (IManualIncludableQueryable<TEntity>)source;
         }
 
         /// <summary>
@@ -100,10 +108,9 @@ namespace System.Linq
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeManyManually<TEntity, TNewNavigation>(
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyManually<TEntity, TNewNavigation>(
             this IOrderedManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
             where TEntity : class
             where TNewNavigation : class
         {
@@ -112,7 +119,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
@@ -128,7 +135,7 @@ namespace System.Linq
         /// <param name="isOneToOne"></param>
         /// <param name="isInvokeDistinctInMemory"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNavigation> IncludeOneManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
+        public static ManualIncludableQueryable<TEntity, TNavigation> IncludeOneManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isOneToOne = false,
@@ -141,7 +148,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = ManualIncludableQueryable<TEntity, TEntity, TNavigation>.CreateFirstManyToOneIncludeChainQuery(source,
+            var includableQuery = ManualIncludableQueryable<TEntity, TNavigation>.CreateFirstManyToOneIncludeChainQuery(source,
                 navigationPropertyPath,
                 dbContext,
                 isOneToOne: isOneToOne,
@@ -154,7 +161,6 @@ namespace System.Linq
         /// Include many-to-one or one-to-one navigations
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TSecondLastNavigation"></typeparam>
         /// <typeparam name="TLastNavigation"></typeparam>
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="source"></param>
@@ -163,14 +169,12 @@ namespace System.Linq
         /// <param name="isOneToOne"></param>
         /// <param name="isInvokeDistinctInMemory"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeOneManually<TEntity, TSecondLastNavigation, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> source,
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeOneManually<TEntity, TLastNavigation, TNewNavigation>(
+            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
             where TEntity : class
-            where TSecondLastNavigation : class
             where TLastNavigation : class
             where TNewNavigation : class
         {
@@ -180,7 +184,6 @@ namespace System.Linq
             }
 
             var includableQuery = source.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
-                dbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
@@ -198,10 +201,9 @@ namespace System.Linq
         /// <param name="isOneToOne"></param>
         /// <param name="isInvokeDistinctInMemory"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeOneManually<TEntity, TNewNavigation>(
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeOneManually<TEntity, TNewNavigation>(
             this IManualIncludableQueryable<TEntity> source,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
             where TEntity : class
@@ -213,7 +215,6 @@ namespace System.Linq
             }
 
             var includableQuery = source.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
-                dbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
@@ -231,10 +232,9 @@ namespace System.Linq
         /// <param name="isOneToOne"></param>
         /// <param name="isInvokeDistinctInMemory"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeOneManually<TEntity, TNewNavigation>(
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeOneManually<TEntity, TNewNavigation>(
             this IOrderedManualIncludableQueryable<TEntity> source,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
             where TEntity : class
@@ -246,7 +246,6 @@ namespace System.Linq
             }
 
             var includableQuery = source.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
-                dbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
@@ -262,7 +261,7 @@ namespace System.Linq
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNavigation> IncludeManyUniqueManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
+        public static ManualIncludableQueryable<TEntity, TNavigation> IncludeManyUniqueManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
            DbContext dbContext)
            where TEntity : class
@@ -273,7 +272,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = ManualIncludableQueryable<TEntity, TEntity, TNavigation>.CreateFirstOneToManyUniqueIncludeChainQuery(source,
+            var includableQuery = ManualIncludableQueryable<TEntity, TNavigation>.CreateFirstOneToManyUniqueIncludeChainQuery(source,
                 navigationPropertyPath,
                 dbContext);
 
@@ -284,19 +283,16 @@ namespace System.Linq
         /// Include one-to-many navigations with a unique key
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TSecondLastNavigation"></typeparam>
         /// <typeparam name="TLastNavigation"></typeparam>
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="source"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TSecondLastNavigation, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> source,
-            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext)
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TLastNavigation, TNewNavigation>(
+            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
+            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
             where TEntity : class
-            where TSecondLastNavigation : class
             where TLastNavigation : class
             where TNewNavigation : class
         {
@@ -305,7 +301,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
@@ -319,10 +315,9 @@ namespace System.Linq
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TNewNavigation>(
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TNewNavigation>(
             this IManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext)
+            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
             where TEntity : class
             where TNewNavigation : class
         {
@@ -331,7 +326,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
@@ -345,10 +340,9 @@ namespace System.Linq
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TNewNavigation>(
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TNewNavigation>(
            this IOrderedManualIncludableQueryable<TEntity> source,
-           Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-           DbContext dbContext)
+           Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
            where TEntity : class
            where TNewNavigation : class
         {
@@ -357,7 +351,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
@@ -366,19 +360,16 @@ namespace System.Linq
         /// Include one-to-many navigations
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TSecondLastNavigation"></typeparam>
         /// <typeparam name="TLastNavigation"></typeparam>
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="source"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TLastNavigation, TNewNavigation> ThenIncludeManyManually<TEntity, TSecondLastNavigation, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> source,
-            Expression<Func<TLastNavigation, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManyManually<TEntity, TLastNavigation, TNewNavigation>(
+            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
+            Expression<Func<TLastNavigation, IEnumerable<TNewNavigation>>> navigationPropertyPath)
             where TEntity : class
-            where TSecondLastNavigation : class
             where TLastNavigation : class
             where TNewNavigation : class
         {
@@ -387,7 +378,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateOneToManyThenIncludeQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateOneToManyThenIncludeQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
@@ -396,7 +387,6 @@ namespace System.Linq
         /// Include many-to-one or one-to-one navigations
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TSecondLastNavigation"></typeparam>
         /// <typeparam name="TLastNavigation"></typeparam>
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="source"></param>
@@ -405,14 +395,12 @@ namespace System.Linq
         /// <param name="isOneToOne"></param>
         /// <param name="isInvokeDistinctInMemory"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TLastNavigation, TNewNavigation> ThenIncludeOneManually<TEntity, TSecondLastNavigation, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> source,
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeOneManually<TEntity, TLastNavigation, TNewNavigation>(
+            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
             Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
             where TEntity : class
-            where TSecondLastNavigation : class
             where TLastNavigation : class
             where TNewNavigation : class
         {
@@ -422,7 +410,6 @@ namespace System.Linq
             }
 
             var includableQuery = source.CreateManyToOneThenIncludeQuery<TNewNavigation>(navigationPropertyPath,
-                dbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
@@ -433,19 +420,16 @@ namespace System.Linq
         /// Include one-to-many navigations with a unique key
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TSecondLastNavigation"></typeparam>
         /// <typeparam name="TLastNavigation"></typeparam>
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="source"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="dbContext"></param>
         /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TLastNavigation, TNewNavigation> ThenIncludeManyUniqueManually<TEntity, TSecondLastNavigation, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> source,
-            Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext)
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManyUniqueManually<TEntity, TLastNavigation, TNewNavigation>(
+            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
+            Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath)
             where TEntity : class
-            where TSecondLastNavigation : class
             where TLastNavigation : class
             where TNewNavigation : class
         {
@@ -454,12 +438,13 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateOneToManyUniqueThenIncludeQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            var includableQuery = source.CreateOneToManyUniqueThenIncludeQuery<TNewNavigation>(navigationPropertyPath);
 
             return includableQuery;
         }
 
-        public static ManualIncludableQueryable<TEntity, TEntity, TEntity> CreateEmptyManualIncludeableQuery<TEntity>(this IQueryable<TEntity> source)
+        public static IManualIncludableQueryable<TEntity> CreateEmptyManualIncludableQuery<TEntity>(this IQueryable<TEntity> source,
+            DbContext dbContext)
             where TEntity : class
         {
             if (source == null)
@@ -467,7 +452,7 @@ namespace System.Linq
                 return null;
             }
 
-            var query = ManualIncludableQueryable<TEntity, TEntity, TEntity>.CreateEmptyManualIncludableQueryable(source);
+            var query = ManualIncludableQueryable<TEntity, TEntity>.CreateEmptyManualIncludableQueryable(source, dbContext);
 
             return query;
         }

@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -15,18 +16,38 @@ namespace EFCore3Library
     {
         IIncludedNavigationQueryChainNode PreviousNode { get; }
 
-        IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery);
+        IIncludedNavigationQueryChainNode NextNode { get; }
+
+        void AppendNextNode(IIncludedNavigationQueryChainNode nextNode);
+
+        bool IsOneToOne { get; }
+
+        string NavigationPropertyName { get; }
+
+        IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery, bool isUseJoin);
 
         IQueryable CachedNavigationQueryNoType { get; }
 
-        IEnumerable<object> InvokeQueryNoType(IEnumerable<object> entities, IQueryable sourceQuery, IEnumerable<object> loadedNavigations = null);
+        ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType InvokeQueryNoType(IEnumerable<object> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable upperLevelQuery,
+            IEnumerable<object> loadedNavigations = null);
 
         IEnumerable<object> GetLoadedNavigationsNoType(IEnumerable<object> entities);
+
+        /// <summary>
+        /// null = unknown (like one to many), true = all loaded, false = at least one entity not loaded
+        /// </summary>
+        /// <param name="entities"></param>
+        /// <returns></returns>
+        bool? IsAllNavigationsLoadedNoType(IEnumerable<object> entities);
 
         Type LastEntityType { get; }
         Type LastNavigationType { get; }
 
         string FKName { get; }
+
+        string FKNameChain { get; }
 
         int LastEntityOffsetFromFirstEntity { get; }
     }
@@ -35,19 +56,6 @@ namespace EFCore3Library
         where TLastNavigation : class
     {
         IQueryable<TLastNavigation> CachedNavigationQuery { get; }
-    }
-
-    internal interface IIncludedNavigationQueryChainNode<TLastEntity, TLastNavigation> : IIncludedNavigationQueryChainNode<TLastNavigation>
-        where TLastEntity : class
-        where TLastNavigation : class
-    {
-        IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery);
-
-        List<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
-            IQueryable<TLastEntity> sourceQuery,
-            IEnumerable<TLastNavigation> loadedNavigations = null);
-
-        List<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities);
 
         IIncludedNavigationQueryChainNode<TLastNavigation, TNextNavigation> CreateOneToManyThenIncludeNode<TNextNavigation>(Expression<Func<TLastNavigation, IEnumerable<TNextNavigation>>> navigationPropertyPath,
             DbContext dbContext)
@@ -64,21 +72,69 @@ namespace EFCore3Library
             where TNextNavigation : class;
     }
 
+    internal interface IIncludedNavigationQueryChainNode<TLastEntity, TLastNavigation> : IIncludedNavigationQueryChainNode<TLastNavigation>
+        where TLastEntity : class
+        where TLastNavigation : class
+    {
+        IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery, bool isUseJoin);
+
+        ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable<TLastEntity> upperLevelQuery,
+            IEnumerable<TLastNavigation> loadedNavigations = null);
+
+        IEnumerable<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities);
+
+        /// <summary>
+        /// null = unknown (like one to many), true = all loaded, false = at least one entity not loaded
+        /// </summary>
+        /// <param name="entities"></param>
+        /// <returns></returns>
+        bool? IsAllNavigationsLoaded(IEnumerable<TLastEntity> entities);
+    }
+
     internal class OneToManyIncludeQueryChainNode<TLastEntity, TLastNavigation> : IIncludedNavigationQueryChainNode<TLastEntity, TLastNavigation>
         where TLastEntity : class
         where TLastNavigation : class
     {
-        private readonly IIncludedNavigationQueryChainNode PreviousNode;
+        private readonly IIncludedNavigationQueryChainNode _previousNode;
 
         IIncludedNavigationQueryChainNode IIncludedNavigationQueryChainNode.PreviousNode
         {
             get
             {
-                return PreviousNode;
+                return _previousNode;
             }
         }
 
-        private readonly Expression<Func<TLastEntity, IEnumerable<TLastNavigation>>> NavigationPropertySelector;
+        private IIncludedNavigationQueryChainNode _nextNode;
+
+        IIncludedNavigationQueryChainNode IIncludedNavigationQueryChainNode.NextNode
+        {
+            get
+            {
+                return _nextNode;
+            }
+        }
+
+        public void AppendNextNode(IIncludedNavigationQueryChainNode nextNode)
+        {
+            if (nextNode == null)
+            {
+                throw new ArgumentNullException(nameof(nextNode));
+            }
+
+            if (_nextNode != null)
+            {
+                throw new InvalidOperationException("Next node already set");
+            }
+
+            this._nextNode = nextNode;
+        }
+
+        public bool IsOneToOne => false;
+
+        private readonly Expression<Func<TLastEntity, IEnumerable<TLastNavigation>>> _navigationPropertySelector;
 
         private IQueryable<TLastNavigation> _cachedNavigationQuery { get; set; }
 
@@ -86,7 +142,7 @@ namespace EFCore3Library
 
         public IQueryable CachedNavigationQueryNoType => _cachedNavigationQuery;
 
-        public IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery)
+        public IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery, bool isUseJoin)
         {
             if (sourceQuery == null)
             {
@@ -99,84 +155,112 @@ namespace EFCore3Library
                 throw new NotImplementedException("Must apply order by before take");
             }
 
-            //For now we didn't find any performance issue with select many so use the select many solution instead of join to be more clean
-            //var navigationRawQuery = dbContext.Set<TNavigation>().AsQueryable();
+            IQueryable<TLastNavigation> navigationQuery;
 
-            //if (!sourceQuery.GetIsTracking(dbContext))
-            //{
-            //    navigationRawQuery = navigationRawQuery.AsNoTracking();
-            //}
+            if (isUseJoin)
+            {
+                var navigationRawQuery = _dbContext.Set<TLastNavigation>().AsQueryable();
 
-            //var navigationQuery = sourceQuery.Join(navigationRawQuery, pkSelector, fkSelector, (left, right) => right);
+                if (!sourceQuery.GetIsTracking(_dbContext))
+                {
+                    navigationRawQuery = navigationRawQuery.AsNoTracking();
+                }
 
-            //var navigationQuery = sourceQuery.SelectMany(navigationPropertySelector);
-
-            var navigationQuery = sourceQuery.SelectMany(NavigationPropertySelector);
+                navigationQuery = ManualIncludeQueryHelper.BuildJoinQuerySelectInner(sourceQuery,
+                    navigationRawQuery,
+                    _pkSelectorExpressionForJoin,
+                    _fkSelectorExpression,
+                    _fkType);
+            }
+            else
+            {
+                navigationQuery = sourceQuery.SelectMany(_navigationPropertySelector);
+            }
 
             _cachedNavigationQuery = navigationQuery;
 
             return navigationQuery;
         }
 
-        public IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery)
+        public IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery, bool isUseJoin)
         {
             if (sourceQuery == null)
             {
                 throw new ArgumentNullException(nameof(sourceQuery));
             }
 
-            return BuildNavigationQuery(sourceQuery as IQueryable<TLastEntity>);
+            return BuildNavigationQuery(sourceQuery as IQueryable<TLastEntity>, isUseJoin);
         }
 
-        private readonly PropertyInfo NavigationPropertyInfo;
+        private readonly PropertyInfo _navigationPropertyInfo;
 
-        private readonly Func<TLastEntity, IEnumerable<TLastNavigation>> NavigationPropertyInfoGetter;
+        string IIncludedNavigationQueryChainNode.NavigationPropertyName
+        {
+            get
+            {
+                return _navigationPropertyInfo.Name;
+            }
+        }
 
-        private readonly Action<TLastEntity, object> NavigationPropertyInfoSetter;
+        private readonly Func<TLastEntity, IEnumerable<TLastNavigation>> _navigationPropertyInfoGetter;
 
-        private readonly PropertyInfo NavigationInversePkPropertyInfo;
+        private readonly Action<TLastEntity, object> _navigationPropertyInfoSetter;
 
-        private readonly Action<TLastNavigation, object> NavigationInversePkPropertyInfoSetter;
+        private readonly PropertyInfo _navigationInversePkPropertyInfo;
 
-        //type can be int, long or other numeric type, make more generic
-        //public Func<TLastEntity, int> PKSelector { get; set; }
-        private readonly Func<TLastEntity, object> PKSelector;
+        private readonly Action<TLastNavigation, object> _navigationInversePkPropertyInfoSetter;
 
-        private readonly bool IsFKNullable;
+        private readonly Func<TLastEntity, object> _pkSelector;
 
-        //type can be int, long, int?, long? or other numeric type, make more generic
-        //public Func<TLastNavigation, int> FKSelector { get; set; }
-        //public Func<TLastNavigation, int?> FKSelectorNullable { get; set; }
+        private readonly LambdaExpression _pkSelectorExpressionForJoin;
 
-        private readonly Func<TLastNavigation, object> FKSelector;
+        private readonly Type _pkType;
 
-        private readonly Func<TLastNavigation, object> NavigationPKInverseEntityFKSelector;
+        private readonly bool _isFKNullable;
 
-        private readonly List<Func<TLastNavigation, object>> NavigationPKSelectors = new List<Func<TLastNavigation, object>>();
+        private readonly Func<TLastNavigation, object> _fkSelector;
 
-        private readonly DbContext DbContext;
+        private readonly LambdaExpression _fkSelectorExpression;
+
+        private readonly Type _fkType;
+
+        private readonly Func<TLastNavigation, object> _navigationPKInverseEntityFKSelector;
+
+        private readonly List<Func<TLastNavigation, object>> navigationPKSelectors = new List<Func<TLastNavigation, object>>();
+
+        private readonly DbContext _dbContext;
 
         public Type LastEntityType => typeof(TLastEntity);
 
         public Type LastNavigationType => typeof(TLastNavigation);
 
-        private readonly string FKName;
+        private readonly string _fkName;
 
         string IIncludedNavigationQueryChainNode.FKName
         {
             get
             {
-                return FKName;
+                return _fkName;
             }
         }
 
-        private readonly int LastEntityOffsetFromFirstEntity;
+        private readonly string _fkNameChain;
+
+        string IIncludedNavigationQueryChainNode.FKNameChain
+        {
+            get
+            {
+                return _fkNameChain;
+            }
+        }
+
+        private readonly int _lastEntityOffsetFromFirstEntity;
 
         int IIncludedNavigationQueryChainNode.LastEntityOffsetFromFirstEntity
         {
             get
             {
-                return LastEntityOffsetFromFirstEntity;
+                return _lastEntityOffsetFromFirstEntity;
             }
         }
 
@@ -190,48 +274,67 @@ namespace EFCore3Library
             Action<TLastNavigation, object> navigationInversePkPropertyInfoSetter,
             string fkName,
             Func<TLastEntity, object> pkSelector,
+            LambdaExpression pkSelectorExpressionForJoin,
+            Type pkType,
             Func<TLastNavigation, object> fkSelector,
+            LambdaExpression fkSelectorExpression,
+            Type fkType,
             Func<TLastNavigation, object> navigationPKInverseEntityFKSelector,
             List<Func<TLastNavigation, object>> navigationPKSelectors,
             DbContext dbContext,
             bool isFKNullable)
         {
-            PreviousNode = previousNode;
-            LastEntityOffsetFromFirstEntity = lastEntityOffsetFromFirstEntity;
-            NavigationPropertySelector = navigationPropertySelector;
-            NavigationPropertyInfo = navigationPropertyInfo;
-            NavigationInversePkPropertyInfo = navigationInversePkPropertyInfo;
-            NavigationPropertyInfoGetter = navigationPropertyInfoGetter;
-            NavigationPropertyInfoSetter = navigationPropertyInfoSetter;
-            NavigationInversePkPropertyInfoSetter = navigationInversePkPropertyInfoSetter;
-            FKName = fkName;
-            PKSelector = pkSelector;
-            FKSelector = fkSelector;
-            IsFKNullable = isFKNullable;
-            NavigationPKInverseEntityFKSelector = navigationPKInverseEntityFKSelector;
-            NavigationPKSelectors = navigationPKSelectors;
-            DbContext = dbContext;
+            _previousNode = previousNode;
+            _lastEntityOffsetFromFirstEntity = lastEntityOffsetFromFirstEntity;
+            _navigationPropertySelector = navigationPropertySelector;
+            _navigationPropertyInfo = navigationPropertyInfo;
+            _navigationInversePkPropertyInfo = navigationInversePkPropertyInfo;
+            _navigationPropertyInfoGetter = navigationPropertyInfoGetter;
+            _navigationPropertyInfoSetter = navigationPropertyInfoSetter;
+            _navigationInversePkPropertyInfoSetter = navigationInversePkPropertyInfoSetter;
+            _fkName = fkName;
+            _pkSelector = pkSelector;
+            _pkSelectorExpressionForJoin = pkSelectorExpressionForJoin;
+            _pkType = pkType;
+            _fkSelector = fkSelector;
+            _fkSelectorExpression = fkSelectorExpression;
+            _fkType = fkType;
+            _isFKNullable = isFKNullable;
+            _navigationPKInverseEntityFKSelector = navigationPKInverseEntityFKSelector;
+            this.navigationPKSelectors = navigationPKSelectors;
+            _dbContext = dbContext;
+
+            if (previousNode != null)
+            {
+                previousNode.AppendNextNode(this);
+            }
+
+            _fkNameChain = ManualIncludeQueryHelper.BuildIIncludedNavigationQueryChainNodeFKNameChain(this);
         }
 
-        public List<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
-            IQueryable<TLastEntity> sourceQuery,
+        public ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable<TLastEntity> upperLevelQuery,
             IEnumerable<TLastNavigation> loadedNavigations = null)
         {
-            var navigationQuery = BuildNavigationQuery(sourceQuery);
+            var navigationQuery = BuildNavigationQuery(upperLevelQuery,
+                isUseJoin: isCombineOneToOneQueryUsingEFInclude);
             var query = navigationQuery;
 
             var hasLoadedNavigations = loadedNavigations != null && loadedNavigations.Any();
 
+            var loadedNavigationsFilteredForThisInclude = new List<TLastNavigation>();
+
             if (hasLoadedNavigations)
             {
-                var loadedFKKeysQuery = loadedNavigations.Select(x => FKSelector(x));
+                var loadedFKKeysEnumerable = loadedNavigations.Select(x => _fkSelector(x));
 
-                if (IsFKNullable)
+                if (_isFKNullable)
                 {
-                    loadedFKKeysQuery = loadedFKKeysQuery.Where(x => x != null);
+                    loadedFKKeysEnumerable = loadedFKKeysEnumerable.Where(x => x != null);
                 }
 
-                var loadedFKKeys = loadedFKKeysQuery
+                var loadedFKKeys = loadedFKKeysEnumerable
                     .Distinct()
                     .ToList();
 
@@ -241,18 +344,23 @@ namespace EFCore3Library
                 //Another thing is we don't have conditional include for now, so if one FK loaded, which means all navigations linked to this FK loaded, so we can query by FK instead of PK
                 //If we add conditional include in the future, which means we have to change this loaded logic, we have to filter loaded navigations by PK instead of FK, and the it may have more than one PK
 
-                var allFKKeys = entities.Select(PKSelector).ToList();
+                var allFKKeys = entities.Select(_pkSelector).ToList();
 
                 var notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
 
-                var navigationFkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(FKName);
+                var loadedFKKeysForCurrentInclude = allFKKeys.Except(notLoadedFKKeys).ToList();
+
+                loadedNavigationsFilteredForThisInclude = loadedNavigations
+                    .Where(x => loadedFKKeysForCurrentInclude.Contains(_fkSelector(x)))
+                    .ToList();
+
+                var navigationFkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(_fkName);
                 var filterExpression = ManualIncludeQueryHelper.ConvertToContainsExpr(navigationFkSelector, notLoadedFKKeys);
 
-                query = DbContext.Set<TLastNavigation>()
+                query = _dbContext.Set<TLastNavigation>()
                    .AsQueryable();
 
-                //var isTracking = NavigationQuery.GetIsTracking(DbContext);
-                var isTracking = sourceQuery.GetIsTracking(DbContext);
+                var isTracking = upperLevelQuery.GetIsTracking(_dbContext);
 
                 if (!isTracking)
                 {
@@ -262,17 +370,22 @@ namespace EFCore3Library
                 query = Queryable.Where(query, (dynamic)filterExpression);
             }
 
-            var allNavigationEntities = query.ToList();
+            var result = new ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation>();
 
-            var result = new List<TLastNavigation>();
+            var invokeQueryCoreResult = ManualIncludeQueryHelper.InvokeQueryCore(this,
+                query,
+                navigationQuery,
+                isCombineOneToOneQueryUsingEFInclude,
+                loadedNavigationsFilteredForThisInclude);
 
-            var navigationEntitiesLookup = allNavigationEntities
-                .Concat(loadedNavigations ?? new List<TLastNavigation>())
-                .ToLookup(FKSelector);
+            result.Navigations = invokeQueryCoreResult.Navigations;
+            result.LoadedNavigations = invokeQueryCoreResult.LoadedNavigations;
+
+            var navigationEntitiesLookup = result.Navigations.ToLookup(_fkSelector);
 
             foreach (var entity in entities)
             {
-                var keyValueObj = PKSelector(entity);
+                var keyValueObj = _pkSelector(entity);
 
                 var navigationEntities = navigationEntitiesLookup.FirstOrDefault(x => object.Equals(x.Key, keyValueObj));
 
@@ -280,17 +393,15 @@ namespace EFCore3Library
                 {
                     var navigationEntitiesList = navigationEntities.ToList();
 
-                    result.AddRange(navigationEntitiesList);
+                    _navigationPropertyInfoSetter(entity, navigationEntitiesList);
 
-                    NavigationPropertyInfoSetter(entity, navigationEntitiesList);
-
-                    navigationEntitiesList.ForEach(x => NavigationInversePkPropertyInfoSetter(x, entity));
+                    navigationEntitiesList.ForEach(x => _navigationInversePkPropertyInfoSetter(x, entity));
                 }
             }
 
             Expression<Func<TLastNavigation, TLastNavigation, bool>> compareExpression = null;
 
-            foreach (var selector in NavigationPKSelectors)
+            foreach (var selector in navigationPKSelectors)
             {
                 Expression<Func<TLastNavigation, TLastNavigation, bool>> compareExpressionCurrent = (x, y) => selector(x) == selector(y);
 
@@ -299,45 +410,60 @@ namespace EFCore3Library
                     : ManualIncludeQueryHelper.And(compareExpression, compareExpressionCurrent);
             }
 
-            var compareFunc = compareExpression.Compile();
-
-            IEqualityComparer<TLastNavigation> comparer = new ManualIncludeQueryHelper.LambdaComparer<TLastNavigation>(compareFunc);
-
-            //For now one to many cannot have duplicated items, unless the upper level entities has the duplicated items
-            //Because it cannot have one TNavigation linked to two TEntity at the same time
-            //Unless the caller write an inefficient query with duplicated items, there should not be a problem
+            //Assume one to many will not have duplicated items
+            //var compareFunc = compareExpression.Compile();
+            //IEqualityComparer<TLastNavigation> comparer = new ManualIncludeQueryHelper.LambdaComparer<TLastNavigation>(compareFunc);
             //return result.Distinct(comparer).ToList();
 
             return result;
         }
 
-        public IEnumerable<object> InvokeQueryNoType(IEnumerable<object> entities,
-            IQueryable sourceQuery,
+        public ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType InvokeQueryNoType(IEnumerable<object> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable upperLevelQuery,
             IEnumerable<object> loadedNavigations = null)
         {
-            return InvokeQuery(entities.Cast<TLastEntity>(),
-                sourceQuery as IQueryable<TLastEntity>,
+            var typedResult = InvokeQuery(entities?.Cast<TLastEntity>(),
+                isCombineOneToOneQueryUsingEFInclude,
+                upperLevelQuery as IQueryable<TLastEntity>,
                 loadedNavigations?.Cast<TLastNavigation>());
+
+            var result = new ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType
+            {
+                Navigations = typedResult.Navigations,
+                LoadedNavigations = typedResult.LoadedNavigations,
+            };
+
+            return result;
         }
 
-        public List<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities)
+        public IEnumerable<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities)
         {
             if (entities == null || !entities.Any())
             {
                 return new List<TLastNavigation>();
             }
 
-            var allNavigationEntities = entities
-                .Select(NavigationPropertyInfoGetter)
-                .SelectMany(x => x)
-                .ToList();
+            var allNavigationEntitiesEnumerable = entities
+                .Select(_navigationPropertyInfoGetter)
+                .SelectMany(x => x);
 
-            return allNavigationEntities;
+            return allNavigationEntitiesEnumerable;
         }
 
         public IEnumerable<object> GetLoadedNavigationsNoType(IEnumerable<object> entities)
         {
-            return GetLoadedNavigations(entities.Cast<TLastEntity>());
+            return GetLoadedNavigations(entities?.Cast<TLastEntity>());
+        }
+
+        public bool? IsAllNavigationsLoaded(IEnumerable<TLastEntity> entities)
+        {
+            return null;
+        }
+
+        public bool? IsAllNavigationsLoadedNoType(IEnumerable<object> entities)
+        {
+            return null;
         }
 
         public IIncludedNavigationQueryChainNode<TLastNavigation, TNextNavigation> CreateOneToManyThenIncludeNode<TNextNavigation>(Expression<Func<TLastNavigation, IEnumerable<TNextNavigation>>> navigationPropertyPath,
@@ -385,17 +511,44 @@ namespace EFCore3Library
         where TLastEntity : class
         where TLastNavigation : class
     {
-        private readonly IIncludedNavigationQueryChainNode PreviousNode;
+        private readonly IIncludedNavigationQueryChainNode _previousNode;
 
         IIncludedNavigationQueryChainNode IIncludedNavigationQueryChainNode.PreviousNode
         {
             get
             {
-                return PreviousNode;
+                return _previousNode;
             }
         }
 
-        private readonly Expression<Func<TLastEntity, TLastNavigation>> NavigationPropertySelector;
+        private IIncludedNavigationQueryChainNode _nextNode;
+
+        IIncludedNavigationQueryChainNode IIncludedNavigationQueryChainNode.NextNode
+        {
+            get
+            {
+                return _nextNode;
+            }
+        }
+
+        public void AppendNextNode(IIncludedNavigationQueryChainNode nextNode)
+        {
+            if (nextNode == null)
+            {
+                throw new ArgumentNullException(nameof(nextNode));
+            }
+
+            if (_nextNode != null)
+            {
+                throw new InvalidOperationException("Next node already set");
+            }
+
+            this._nextNode = nextNode;
+        }
+
+        public bool IsOneToOne => true;
+
+        private readonly Expression<Func<TLastEntity, TLastNavigation>> _navigationPropertySelector;
 
         private IQueryable<TLastNavigation> _cachedNavigationQuery { get; set; }
 
@@ -403,7 +556,7 @@ namespace EFCore3Library
 
         public IQueryable CachedNavigationQueryNoType => _cachedNavigationQuery;
 
-        public IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery)
+        public IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery, bool isUseJoin)
         {
             if (sourceQuery == null)
             {
@@ -416,87 +569,115 @@ namespace EFCore3Library
                 throw new NotImplementedException("Must apply order by before take");
             }
 
-            //For now we didn't find any performance issue with select many so use the select many solution instead of join to be more clean
-            //var navigationRawQuery = dbContext.Set<TNavigation>().AsQueryable();
+            IQueryable<TLastNavigation> navigationQuery;
 
-            //if (!sourceQuery.GetIsTracking(dbContext))
-            //{
-            //    navigationRawQuery = navigationRawQuery.AsNoTracking();
-            //}
+            if (isUseJoin)
+            {
+                var navigationRawQuery = _dbContext.Set<TLastNavigation>().AsQueryable();
 
-            //var navigationQuery = sourceQuery.Join(navigationRawQuery, pkSelector, fkSelector, (left, right) => right);
+                if (!sourceQuery.GetIsTracking(_dbContext))
+                {
+                    navigationRawQuery = navigationRawQuery.AsNoTracking();
+                }
 
-            //var navigationQuery = sourceQuery.SelectMany(navigationPropertySelector);
-
-            var navigationQuery = sourceQuery
-                .Select(NavigationPropertySelector)
-                //treat as one to many there must be empty list, so when unique there must be null
-                .Where(x => x != null);
+                navigationQuery = ManualIncludeQueryHelper.BuildJoinQuerySelectInner(sourceQuery,
+                    navigationRawQuery,
+                    _pkSelectorExpression,
+                    _fkSelectorExpressionForJoin,
+                    _fkType);
+            }
+            else
+            {
+                navigationQuery = sourceQuery
+                    .Select(_navigationPropertySelector)
+                    //treat as one to many there must be empty list, so when unique there must be null
+                    .Where(x => x != null);
+            }
 
             _cachedNavigationQuery = navigationQuery;
 
             return navigationQuery;
         }
 
-        public IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery)
+        public IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery, bool isUseJoin)
         {
             if (sourceQuery == null)
             {
                 throw new ArgumentNullException(nameof(sourceQuery));
             }
 
-            return BuildNavigationQuery(sourceQuery as IQueryable<TLastEntity>);
+            return BuildNavigationQuery(sourceQuery as IQueryable<TLastEntity>, isUseJoin);
         }
 
-        private readonly PropertyInfo NavigationPropertyInfo;
+        private readonly PropertyInfo _navigationPropertyInfo;
 
-        private readonly Func<TLastEntity, TLastNavigation> NavigationPropertyInfoGetter;
+        string IIncludedNavigationQueryChainNode.NavigationPropertyName
+        {
+            get
+            {
+                return _navigationPropertyInfo.Name;
+            }
+        }
 
-        private readonly Action<TLastEntity, object> NavigationPropertyInfoSetter;
+        private readonly Func<TLastEntity, TLastNavigation> _navigationPropertyInfoGetter;
 
-        private readonly PropertyInfo NavigationInversePkPropertyInfo;
+        private readonly Action<TLastEntity, object> _navigationPropertyInfoSetter;
 
-        private readonly Action<TLastNavigation, object> NavigationInversePkPropertyInfoSetter;
+        private readonly PropertyInfo _navigationInversePkPropertyInfo;
 
-        //type can be int, long or other numeric type, make more generic
-        //public Func<TLastEntity, int> PKSelector { get; set; }
-        private readonly Func<TLastEntity, object> PKSelector;
+        private readonly Action<TLastNavigation, object> _navigationInversePkPropertyInfoSetter;
 
-        private readonly bool IsFKNullable;
+        private readonly Func<TLastEntity, object> _pkSelector;
 
-        //type can be int, long, int?, long? or other numeric type, make more generic
-        //public Func<TLastNavigation, int> FKSelector { get; set; }
-        //public Func<TLastNavigation, int?> FKSelectorNullable { get; set; }
+        private readonly LambdaExpression _pkSelectorExpression;
 
-        private readonly Func<TLastNavigation, object> FKSelector;
+        private readonly Type _pkType;
 
-        private readonly Func<TLastNavigation, object> NavigationPKInverseEntityFKSelector;
+        private readonly bool _isFKNullable;
 
-        private readonly List<Func<TLastNavigation, object>> NavigationPKSelectors = new List<Func<TLastNavigation, object>>();
+        private readonly Func<TLastNavigation, object> _fkSelector;
 
-        private readonly DbContext DbContext;
+        private readonly LambdaExpression _fkSelectorExpressionForJoin;
+
+        private readonly Type _fkType;
+
+        private readonly Func<TLastNavigation, object> _navigationPKInverseEntityFKSelector;
+
+        private readonly List<Func<TLastNavigation, object>> _navigationPKSelectors = new List<Func<TLastNavigation, object>>();
+
+        private readonly DbContext _dbContext;
 
         public Type LastEntityType => typeof(TLastEntity);
 
         public Type LastNavigationType => typeof(TLastNavigation);
 
-        private readonly string FKName;
+        private readonly string _fkName;
 
         string IIncludedNavigationQueryChainNode.FKName
         {
             get
             {
-                return FKName;
+                return _fkName;
             }
         }
 
-        private readonly int LastEntityOffsetFromFirstEntity;
+        private readonly string _fkNameChain;
+
+        string IIncludedNavigationQueryChainNode.FKNameChain
+        {
+            get
+            {
+                return _fkNameChain;
+            }
+        }
+
+        private readonly int _lastEntityOffsetFromFirstEntity;
 
         int IIncludedNavigationQueryChainNode.LastEntityOffsetFromFirstEntity
         {
             get
             {
-                return LastEntityOffsetFromFirstEntity;
+                return _lastEntityOffsetFromFirstEntity;
             }
         }
 
@@ -510,43 +691,64 @@ namespace EFCore3Library
             Action<TLastNavigation, object> navigationInversePkPropertyInfoSetter,
             string fkName,
             Func<TLastEntity, object> pkSelector,
+            LambdaExpression pkSelectorExpressionForJoin,
+            Type pkType,
             Func<TLastNavigation, object> fkSelector,
+            LambdaExpression fkSelectorExpression,
+            Type fkType,
             Func<TLastNavigation, object> navigationPKInverseEntityFKSelector,
             List<Func<TLastNavigation, object>> navigationPKSelectors,
             DbContext dbContext,
             bool isFKNullable)
         {
-            PreviousNode = previousNode;
-            LastEntityOffsetFromFirstEntity = lastEntityOffsetFromFirstEntity;
-            NavigationPropertySelector = navigationPropertySelector;
-            NavigationPropertyInfo = navigationPropertyInfo;
-            NavigationInversePkPropertyInfo = navigationInversePkPropertyInfo;
-            NavigationPropertyInfoGetter = navigationPropertyInfoGetter;
-            NavigationPropertyInfoSetter = navigationPropertyInfoSetter;
-            NavigationInversePkPropertyInfoSetter = navigationInversePkPropertyInfoSetter;
-            FKName = fkName;
-            PKSelector = pkSelector;
-            FKSelector = fkSelector;
-            IsFKNullable = isFKNullable;
-            NavigationPKInverseEntityFKSelector = navigationPKInverseEntityFKSelector;
-            NavigationPKSelectors = navigationPKSelectors;
-            DbContext = dbContext;
+            _previousNode = previousNode;
+            _lastEntityOffsetFromFirstEntity = lastEntityOffsetFromFirstEntity;
+            _navigationPropertySelector = navigationPropertySelector;
+            _navigationPropertyInfo = navigationPropertyInfo;
+            _navigationInversePkPropertyInfo = navigationInversePkPropertyInfo;
+            _navigationPropertyInfoGetter = navigationPropertyInfoGetter;
+            this._navigationPropertyInfoSetter = navigationPropertyInfoSetter;
+            _navigationInversePkPropertyInfoSetter = navigationInversePkPropertyInfoSetter;
+            _fkName = fkName;
+            _pkSelector = pkSelector;
+            _pkSelectorExpression = pkSelectorExpressionForJoin;
+            _pkType = pkType;
+            _fkSelector = fkSelector;
+            _fkSelectorExpressionForJoin = fkSelectorExpression;
+            _fkType = fkType;
+            _isFKNullable = isFKNullable;
+            _navigationPKInverseEntityFKSelector = navigationPKInverseEntityFKSelector;
+            _navigationPKSelectors = navigationPKSelectors;
+            _dbContext = dbContext;
+
+            if (previousNode != null)
+            {
+                previousNode.AppendNextNode(this);
+            }
+
+            _fkNameChain = ManualIncludeQueryHelper.BuildIIncludedNavigationQueryChainNodeFKNameChain(this);
         }
 
-        public List<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
-            IQueryable<TLastEntity> sourceQuery,
+        public ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable<TLastEntity> upperLevelQuery,
             IEnumerable<TLastNavigation> loadedNavigations = null)
         {
-            var navigationQuery = BuildNavigationQuery(sourceQuery);
+            var navigationQuery = BuildNavigationQuery(upperLevelQuery,
+                isUseJoin: isCombineOneToOneQueryUsingEFInclude);
             var query = navigationQuery;
+
+            var result = new ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation>();
 
             var hasLoadedNavigations = loadedNavigations != null && loadedNavigations.Any();
 
+            var loadedNavigationsFilteredForThisInclude = new List<TLastNavigation>();
+
             if (hasLoadedNavigations)
             {
-                var loadedFKKeysQuery = loadedNavigations.Select(x => FKSelector(x));
+                var loadedFKKeysQuery = loadedNavigations.Select(x => _fkSelector(x));
 
-                if (IsFKNullable)
+                if (_isFKNullable)
                 {
                     loadedFKKeysQuery = loadedFKKeysQuery.Where(x => x != null);
                 }
@@ -561,17 +763,19 @@ namespace EFCore3Library
                 //Another thing is we don't have conditional include for now, so if one FK loaded, which means all navigations linked to this FK loaded, so we can query by FK instead of PK
                 //If we add conditional include in the future, which means we have to change this loaded logic, we have to filter loaded navigations by PK instead of FK, and the it may have more than one PK
 
-                var allFKKeys = entities.Select(PKSelector).ToList();
+                var allFKKeys = entities.Select(_pkSelector).ToList();
+
+                loadedNavigationsFilteredForThisInclude.AddRange(loadedNavigations.Where(x => allFKKeys.Contains(_fkSelector(x))));
 
                 var notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
 
-                var navigationFkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(FKName);
+                var navigationFkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(_fkName);
                 var filterExpression = ManualIncludeQueryHelper.ConvertToContainsExpr(navigationFkSelector, notLoadedFKKeys);
 
-                query = DbContext.Set<TLastNavigation>()
+                query = _dbContext.Set<TLastNavigation>()
                    .AsQueryable();
 
-                var isTracking = sourceQuery.GetIsTracking(DbContext);
+                var isTracking = upperLevelQuery.GetIsTracking(_dbContext);
 
                 if (!isTracking)
                 {
@@ -581,21 +785,26 @@ namespace EFCore3Library
                 query = Queryable.Where(query, (dynamic)filterExpression);
             }
 
-            var allNavigationEntities = query.ToList();
+            var invokeQueryCoreResult = ManualIncludeQueryHelper.InvokeQueryCore(this,
+                query,
+                navigationQuery,
+                isCombineOneToOneQueryUsingEFInclude,
+                loadedNavigationsFilteredForThisInclude);
 
-            var result = new List<TLastNavigation>();
+            result.Navigations = invokeQueryCoreResult.Navigations;
+            result.LoadedNavigations = invokeQueryCoreResult.LoadedNavigations;
 
             foreach (var entity in entities)
             {
-                var keyValueObj = PKSelector(entity);
+                var keyValueObj = _pkSelector(entity);
 
                 if (keyValueObj == null)
                 {
-                    continue;
+                    //it's Pk it should not be null
+                    throw new NotImplementedException();
                 }
 
-                var navigationEntity = allNavigationEntities.FirstOrDefault(x => object.Equals(FKSelector(x), keyValueObj))
-                    ?? loadedNavigations?.FirstOrDefault(x => object.Equals(FKSelector(x), keyValueObj));
+                var navigationEntity = result.Navigations.FirstOrDefault(x => object.Equals(_fkSelector(x), keyValueObj));
 
                 if (navigationEntity == null)
                 {
@@ -603,46 +812,70 @@ namespace EFCore3Library
                     continue;
                 }
 
-                if (!result.Any(x => object.Equals(FKSelector(x), keyValueObj)))
-                {
-                    result.Add(navigationEntity);
-                }
+                _navigationPropertyInfoSetter(entity, navigationEntity);
 
-                NavigationPropertyInfoSetter(entity, navigationEntity);
-
-                NavigationInversePkPropertyInfoSetter(navigationEntity, entity);
+                _navigationInversePkPropertyInfoSetter(navigationEntity, entity);
             }
 
             return result;
         }
 
-        public IEnumerable<object> InvokeQueryNoType(IEnumerable<object> entities,
-            IQueryable sourceQuery,
+        public ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType InvokeQueryNoType(IEnumerable<object> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable upperLevelQuery,
             IEnumerable<object> loadedNavigations = null)
         {
-            return InvokeQuery(entities.Cast<TLastEntity>(),
-                sourceQuery as IQueryable<TLastEntity>,
+            var typedResult = InvokeQuery(entities?.Cast<TLastEntity>(),
+                isCombineOneToOneQueryUsingEFInclude,
+                upperLevelQuery as IQueryable<TLastEntity>,
                 loadedNavigations?.Cast<TLastNavigation>());
+
+            var result = new ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType
+            {
+                Navigations = typedResult.Navigations,
+                LoadedNavigations = typedResult.LoadedNavigations,
+            };
+
+            return result;
         }
 
-        public List<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities)
+        public IEnumerable<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities)
         {
             if (entities == null || !entities.Any())
             {
                 return new List<TLastNavigation>();
             }
 
-            var allNavigationEntities = entities
-                .Select(NavigationPropertyInfoGetter)
-                //.SelectMany(x => x)
-                .ToList();
+            var allNavigationEntitiesEnumerable = entities
+                .Select(_navigationPropertyInfoGetter)
+                .Where(x => x != null);
 
-            return allNavigationEntities;
+            return allNavigationEntitiesEnumerable;
         }
 
         public IEnumerable<object> GetLoadedNavigationsNoType(IEnumerable<object> entities)
         {
-            return GetLoadedNavigations(entities.Cast<TLastEntity>());
+            return GetLoadedNavigations(entities?.Cast<TLastEntity>());
+        }
+
+        public bool? IsAllNavigationsLoaded(IEnumerable<TLastEntity> entities)
+        {
+            if (entities == null || !entities.Any())
+            {
+                return true;
+            }
+
+            if (entities.All(x => _navigationPropertyInfoGetter(x) != null))
+            {
+                return true;
+            }
+
+            return null;
+        }
+
+        public bool? IsAllNavigationsLoadedNoType(IEnumerable<object> entities)
+        {
+            return IsAllNavigationsLoaded(entities?.Cast<TLastEntity>());
         }
 
         public IIncludedNavigationQueryChainNode<TLastNavigation, TNextNavigation> CreateOneToManyThenIncludeNode<TNextNavigation>(Expression<Func<TLastNavigation, IEnumerable<TNextNavigation>>> navigationPropertyPath,
@@ -690,17 +923,42 @@ namespace EFCore3Library
         where TLastEntity : class
         where TLastNavigation : class
     {
-        private readonly IIncludedNavigationQueryChainNode PreviousNode;
+        private readonly IIncludedNavigationQueryChainNode _previousNode;
 
         IIncludedNavigationQueryChainNode IIncludedNavigationQueryChainNode.PreviousNode
         {
             get
             {
-                return PreviousNode;
+                return _previousNode;
             }
         }
 
-        private readonly Expression<Func<TLastEntity, TLastNavigation>> NavigationPropertySelector;
+        private IIncludedNavigationQueryChainNode _nextNode;
+
+        IIncludedNavigationQueryChainNode IIncludedNavigationQueryChainNode.NextNode
+        {
+            get
+            {
+                return _nextNode;
+            }
+        }
+
+        public void AppendNextNode(IIncludedNavigationQueryChainNode nextNode)
+        {
+            if (nextNode == null)
+            {
+                throw new ArgumentNullException(nameof(nextNode));
+            }
+
+            if (_nextNode != null)
+            {
+                throw new InvalidOperationException("Next node already set");
+            }
+
+            this._nextNode = nextNode;
+        }
+
+        private readonly Expression<Func<TLastEntity, TLastNavigation>> _navigationPropertySelector;
 
         private IQueryable<TLastNavigation> _cachedNavigationQuery { get; set; }
 
@@ -708,7 +966,7 @@ namespace EFCore3Library
 
         public IQueryable CachedNavigationQueryNoType => _cachedNavigationQuery;
 
-        public IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery)
+        public IQueryable<TLastNavigation> BuildNavigationQuery(IQueryable<TLastEntity> sourceQuery, bool isUseJoin)
         {
             if (sourceQuery == null)
             {
@@ -717,17 +975,37 @@ namespace EFCore3Library
 
             var sourceQueryFiltered = sourceQuery;
 
-            if (ManualIncludeQueryHelper.IsNullableType(NavigationForeignKeyPropertyInfo.PropertyType))
+            if (ManualIncludeQueryHelper.IsNullableType(_navigationForeignKeyPropertyInfo.PropertyType))
             {
-                var filterPropertyExpression = ManualIncludeQueryHelper.GetPropertySelector<TLastEntity>(FKName);
+                var filterPropertyExpression = ManualIncludeQueryHelper.GetPropertySelector<TLastEntity>(_fkName);
                 var filterExpression = ManualIncludeQueryHelper.ConvertToNotEqualsExpr(filterPropertyExpression, null);
 
                 sourceQueryFiltered = Queryable.Where(sourceQuery, (dynamic)filterExpression);
             }
 
-            var navigationQuery = sourceQueryFiltered.Select(NavigationPropertySelector);
+            IQueryable<TLastNavigation> navigationQuery;
 
-            if (!IsOneToOne)
+            if (isUseJoin)
+            {
+                var navigationRawQuery = _dbContext.Set<TLastNavigation>().AsQueryable();
+
+                if (!sourceQuery.GetIsTracking(_dbContext))
+                {
+                    navigationRawQuery = navigationRawQuery.AsNoTracking();
+                }
+
+                navigationQuery = ManualIncludeQueryHelper.BuildJoinQuerySelectInner(sourceQueryFiltered,
+                    navigationRawQuery,
+                    _fkSelectorExpression,
+                    _pkSelectorExpressionForJoin,
+                    _fkType);
+            }
+            else
+            {
+                navigationQuery = sourceQueryFiltered.Select(_navigationPropertySelector);
+            }
+
+            if (!_isOneToOne)
             {
                 navigationQuery = navigationQuery.Distinct();
             }
@@ -737,59 +1015,93 @@ namespace EFCore3Library
             return navigationQuery;
         }
 
-        public IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery)
+        public IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery, bool isUseJoin)
         {
             if (sourceQuery == null)
             {
                 throw new ArgumentNullException(nameof(sourceQuery));
             }
 
-            return BuildNavigationQuery(sourceQuery as IQueryable<TLastEntity>);
+            return BuildNavigationQuery(sourceQuery as IQueryable<TLastEntity>, isUseJoin);
         }
 
-        private readonly PropertyInfo NavigationPropertyInfo;
+        private readonly PropertyInfo _navigationPropertyInfo;
 
-        private readonly PropertyInfo NavigationForeignKeyPropertyInfo;
+        string IIncludedNavigationQueryChainNode.NavigationPropertyName
+        {
+            get
+            {
+                return _navigationPropertyInfo.Name;
+            }
+        }
 
-        private readonly Func<TLastEntity, TLastNavigation> NavigationPropertyInfoGetter;
+        private readonly PropertyInfo _navigationForeignKeyPropertyInfo;
 
-        private readonly Action<TLastEntity, object> NavigationPropertyInfoSetter;
+        private readonly Func<TLastEntity, TLastNavigation> _navigationPropertyInfoGetter;
 
-        private readonly string PKName;
+        private readonly Action<TLastEntity, object> _navigationPropertyInfoSetter;
 
-        //PK should be single column in this case, but it can be int, long, or other numeric type, so use untyped selector
-        //public Func<TLastNavigation, int> PKSelector { get; set; }
-        private readonly Func<TLastNavigation, object> PKSelector;
+        private readonly string _pkName;
 
-        private readonly Func<TLastEntity, object> FKSelector;
+        private readonly Func<TLastNavigation, object> _pkSelector;
 
-        private readonly DbContext DbContext;
+        private readonly LambdaExpression _pkSelectorExpressionForJoin;
 
-        private readonly bool IsOneToOne = false;
+        private readonly Type _pkType;
 
-        private readonly bool IsInvokeDistinctInMemory = false;
+        private readonly Func<TLastEntity, object> _fkSelector;
+
+        private readonly LambdaExpression _fkSelectorExpression;
+
+        private readonly Type _fkType;
+
+        private readonly DbContext _dbContext;
+
+        private readonly bool _isOneToOne = false;
+
+        bool IIncludedNavigationQueryChainNode.IsOneToOne
+        {
+            get
+            {
+                return _isOneToOne;
+            }
+        }
+
+        private readonly bool _isInvokeDistinctInMemory = false;
 
         public Type LastEntityType => typeof(TLastEntity);
 
         public Type LastNavigationType => typeof(TLastNavigation);
 
-        private readonly string FKName;
+        private readonly string _fkName;
+
+        private readonly bool _isNullableFk;
 
         string IIncludedNavigationQueryChainNode.FKName
         {
             get
             {
-                return FKName;
+                return _fkName;
             }
         }
 
-        private readonly int LastEntityOffsetFromFirstEntity;
+        private readonly string _fkNameChain;
+
+        string IIncludedNavigationQueryChainNode.FKNameChain
+        {
+            get
+            {
+                return _fkNameChain;
+            }
+        }
+
+        private readonly int _lastEntityOffsetFromFirstEntity;
 
         int IIncludedNavigationQueryChainNode.LastEntityOffsetFromFirstEntity
         {
             get
             {
-                return LastEntityOffsetFromFirstEntity;
+                return _lastEntityOffsetFromFirstEntity;
             }
         }
 
@@ -802,40 +1114,62 @@ namespace EFCore3Library
             Action<TLastEntity, object> navigationPropertyInfoSetter,
             string pkName,
             string fkName,
+            bool isNullableFk,
             Func<TLastNavigation, object> pKSelector,
+            LambdaExpression pkSelectorExpressionForJoin,
+            Type pkType,
             Func<TLastEntity, object> fKSelector,
+            LambdaExpression fkSelectorExpression,
+            Type fkType,
             DbContext dbContext,
             bool isOneToOne,
             bool isInvokeDistinctInMemory)
         {
+            _previousNode = previousNode;
+            _lastEntityOffsetFromFirstEntity = lastEntityOffsetFromFirstEntity;
+            _navigationPropertySelector = navigationPropertySelector;
+            _navigationPropertyInfo = navigationPropertyInfo;
+            _navigationForeignKeyPropertyInfo = navigationForeignKeyPropertyInfo;
+            _navigationPropertyInfoGetter = navigationPropertyInfoGetter;
+            _navigationPropertyInfoSetter = navigationPropertyInfoSetter;
+            _pkName = pkName;
+            _fkName = fkName;
+            _isNullableFk = isNullableFk;
+            _pkSelector = pKSelector;
+            _pkSelectorExpressionForJoin = pkSelectorExpressionForJoin;
+            _pkType = pkType;
+            _fkSelector = fKSelector;
+            _fkSelectorExpression = fkSelectorExpression;
+            _fkType = fkType;
+            _dbContext = dbContext;
+            _isOneToOne = isOneToOne;
+            _isInvokeDistinctInMemory = isInvokeDistinctInMemory;
 
-            PreviousNode = previousNode;
-            LastEntityOffsetFromFirstEntity = lastEntityOffsetFromFirstEntity;
-            NavigationPropertySelector = navigationPropertySelector;
-            NavigationPropertyInfo = navigationPropertyInfo;
-            NavigationForeignKeyPropertyInfo = navigationForeignKeyPropertyInfo;
-            NavigationPropertyInfoGetter = navigationPropertyInfoGetter;
-            NavigationPropertyInfoSetter = navigationPropertyInfoSetter;
-            PKName = pkName;
-            FKName = fkName;
-            PKSelector = pKSelector;
-            FKSelector = fKSelector;
-            DbContext = dbContext;
-            IsOneToOne = isOneToOne;
-            IsInvokeDistinctInMemory = isInvokeDistinctInMemory;
+            if (previousNode != null)
+            {
+                previousNode.AppendNextNode(this);
+            }
+
+            _fkNameChain = ManualIncludeQueryHelper.BuildIIncludedNavigationQueryChainNodeFKNameChain(this);
         }
 
-        public List<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
-            IQueryable<TLastEntity> sourceQuery,
+        public ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation> InvokeQuery(IEnumerable<TLastEntity> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable<TLastEntity> upperLevelQuery,
             IEnumerable<TLastNavigation> loadedNavigations = null)
         {
-            var navigationQuery = BuildNavigationQuery(sourceQuery);
+            var navigationQuery = BuildNavigationQuery(upperLevelQuery,
+                isUseJoin: isCombineOneToOneQueryUsingEFInclude);
             var query = navigationQuery;
+
+            var result = new ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResult<TLastNavigation>();
 
             var hasLoadedNavigations = loadedNavigations != null && loadedNavigations.Any();
 
+            var loadedNavigationsFilteredForThisInclude = new List<TLastNavigation>();
+
             //If has too many loaded navigations the query performance is bad, so if has loaded navigation we force re-write query
-            var isNeedToOverwriteQuery = hasLoadedNavigations || IsInvokeDistinctInMemory;
+            var isNeedToOverwriteQuery = hasLoadedNavigations || _isInvokeDistinctInMemory;
 
             if (isNeedToOverwriteQuery)
             {
@@ -843,12 +1177,12 @@ namespace EFCore3Library
 
                 LambdaExpression filterOutLoadedNavigationsFilter = null;
 
-                var navigationPkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(PKName);
+                var navigationPkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(_pkName);
 
                 if (hasLoadedNavigations)
                 {
                     loadedKeys = loadedNavigations
-                        .Select(x => PKSelector(x))
+                        .Select(x => _pkSelector(x))
                         .Distinct()
                         .ToList();
 
@@ -859,34 +1193,41 @@ namespace EFCore3Library
 
                 var keyValues = new List<object>();
 
-                var keyValueQuery = entities.Select(FKSelector).Where(x => x != null);
+                var keyValueEnumerable = entities.Select(_fkSelector);
 
-                if (!IsOneToOne)
+                if (_isNullableFk)
                 {
-                    keyValueQuery = keyValueQuery.Distinct();
-
+                    keyValueEnumerable = keyValueEnumerable.Where(x => x != null);
                 }
 
-                keyValues = keyValueQuery.ToList();
+                if (!_isOneToOne)
+                {
+                    keyValueEnumerable = keyValueEnumerable.Distinct();
+                }
+
+                keyValues = keyValueEnumerable.ToList();
 
                 if (keyValues.Count == 0)
                 {
                     //in case all FKs are null no need to load navigations
-                    return new List<TLastNavigation>();
+                    return result;
                 }
 
                 if (hasLoadedNavigations)
                 {
+                    loadedNavigationsFilteredForThisInclude = loadedNavigations
+                        .Where(x => keyValues.Contains(_pkSelector(x)))
+                        .ToList();
+
                     keyValues = keyValues.Except(loadedKeys).ToList();
                 }
 
                 var filterExpression = ManualIncludeQueryHelper.ConvertToContainsExpr(navigationPkSelector, keyValues);
 
-                query = DbContext.Set<TLastNavigation>()
+                query = _dbContext.Set<TLastNavigation>()
                     .AsQueryable();
 
-                //var isTracking = NavigationQuery.GetIsTracking(DbContext);
-                var isTracking = sourceQuery.GetIsTracking(DbContext);
+                var isTracking = upperLevelQuery.GetIsTracking(_dbContext);
 
                 if (!isTracking)
                 {
@@ -896,66 +1237,101 @@ namespace EFCore3Library
                 query = Queryable.Where(query, (dynamic)filterExpression);
             }
 
-            var navigationEntities = query.ToList();
+            var invokeQueryCoreResult = ManualIncludeQueryHelper.InvokeQueryCore(this,
+                query,
+                navigationQuery,
+                isCombineOneToOneQueryUsingEFInclude,
+                loadedNavigationsFilteredForThisInclude);
 
-            var result = new List<TLastNavigation>();
+            result.Navigations = invokeQueryCoreResult.Navigations;
+            result.LoadedNavigations = invokeQueryCoreResult.LoadedNavigations;
 
             foreach (var entity in entities)
             {
-                var keyValueObj = FKSelector(entity);
+                var keyValueObj = _fkSelector(entity);
 
                 if (keyValueObj == null)
                 {
                     continue;
                 }
 
-                var navigationEntity = navigationEntities.FirstOrDefault(x => object.Equals(PKSelector(x), keyValueObj))
-                    ?? loadedNavigations?.FirstOrDefault(x => object.Equals(PKSelector(x), keyValueObj));
+                var navigationEntity = result.Navigations.FirstOrDefault(x => object.Equals(_pkSelector(x), keyValueObj));
 
                 if (navigationEntity == null)
                 {
                     throw new Exception("Error cannot find entity");
                 }
 
-                if (!result.Any(x => object.Equals(PKSelector(x), keyValueObj)))
-                {
-                    result.Add(navigationEntity);
-                }
-
-                NavigationPropertyInfoSetter(entity, navigationEntity);
+                _navigationPropertyInfoSetter(entity, navigationEntity);
             }
 
             return result;
         }
 
-        public IEnumerable<object> InvokeQueryNoType(IEnumerable<object> entities,
-            IQueryable sourceQuery,
+        public ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType InvokeQueryNoType(IEnumerable<object> entities,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IQueryable upperLevelQuery,
             IEnumerable<object> loadedNavigations = null)
         {
-            return InvokeQuery(entities.Cast<TLastEntity>(),
-                sourceQuery as IQueryable<TLastEntity>,
+            var typedResult = InvokeQuery(entities?.Cast<TLastEntity>(),
+                isCombineOneToOneQueryUsingEFInclude,
+                upperLevelQuery as IQueryable<TLastEntity>,
                 loadedNavigations?.Cast<TLastNavigation>());
+
+            var result = new ManualIncludeQueryHelper.IncludedNavigationQueryChainNodeInvokeQueryResultNoType
+            {
+                Navigations = typedResult.Navigations,
+                LoadedNavigations = typedResult.LoadedNavigations,
+            };
+
+            return result;
         }
 
-        public List<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities)
+        public IEnumerable<TLastNavigation> GetLoadedNavigations(IEnumerable<TLastEntity> entities)
         {
             if (entities == null || !entities.Any())
             {
                 return new List<TLastNavigation>();
             }
 
-            var allNavigationEntities = entities
-                .Select(NavigationPropertyInfoGetter)
-                //for nullable FK
-                .Where(x => x != null)
-                .ToList();
+            var allNavigationEnumerable = entities.Select(_navigationPropertyInfoGetter);
 
-            return allNavigationEntities;
+            if (_isNullableFk)
+            {
+                allNavigationEnumerable = allNavigationEnumerable.Where(x => x != null);
+            }
+
+            if (!_isOneToOne)
+            {
+                allNavigationEnumerable = allNavigationEnumerable.Distinct();
+            }
+
+            return allNavigationEnumerable;
         }
 
         public IEnumerable<object> GetLoadedNavigationsNoType(IEnumerable<object> entities)
         {
-            return GetLoadedNavigations(entities.Cast<TLastEntity>());
+            return GetLoadedNavigations(entities?.Cast<TLastEntity>());
+        }
+
+        public bool? IsAllNavigationsLoaded(IEnumerable<TLastEntity> entities)
+        {
+            if (entities == null || !entities.Any())
+            {
+                return true;
+            }
+
+            if (entities.Any(x => _fkSelector(x) != null && _navigationPropertyInfoGetter(x) == null))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        public bool? IsAllNavigationsLoadedNoType(IEnumerable<object> entities)
+        {
+            return IsAllNavigationsLoaded(entities?.Cast<TLastEntity>());
         }
 
         public IIncludedNavigationQueryChainNode<TLastNavigation, TNextNavigation> CreateOneToManyThenIncludeNode<TNextNavigation>(Expression<Func<TLastNavigation, IEnumerable<TNextNavigation>>> navigationPropertyPath,
@@ -1004,8 +1380,6 @@ namespace EFCore3Library
     #region query (multiple chain)
 
     public interface IManualIncludableQueryable<TEntity>
-        //Avoid call Where(), Order(), etc. after call IncludeManual(), since the extension method cannot be override
-        //: IQueryable<TEntity>
         where TEntity : class
     {
         List<TEntity> InvokeQueryToList();
@@ -1028,26 +1402,25 @@ namespace EFCore3Library
         IManualIncludableQueryable<TEntity> CreateNewReplaceQueryable(IQueryable<TEntity> newQueryable);
         IOrderedManualIncludableQueryable<TEntity> CreateNewOrderedQueryable(IOrderedQueryable<TEntity> newOrderedQueryable);
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-           DbContext dbContext)
+        ManualIncludableQueryable<TEntity, TNewNavigation> CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
             where TNewNavigation : class;
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-           DbContext dbContext)
+        ManualIncludableQueryable<TEntity, TNewNavigation> CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
             where TNewNavigation : class;
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
+        ManualIncludableQueryable<TEntity, TNewNavigation> CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne,
             bool isInvokeDistinctInMemory)
             where TNewNavigation : class;
     }
 
-    public class ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> : IManualIncludableQueryable<TEntity>
+    public class ManualIncludableQueryable<TEntity, TLastNavigation> : IManualIncludableQueryable<TEntity>
         where TEntity : class
-        where TSecondLastNavigation : class
         where TLastNavigation : class
     {
+        //For now hard code to false, assume in most cases one query is better than multiple queries per layer (if one to one)
+        public readonly bool IsCombineOneToOneQueryUsingEFInclude = true;
+
         private readonly IQueryable<TEntity> _queryable;
 
         public Expression Expression => _queryable.Expression;
@@ -1058,14 +1431,32 @@ namespace EFCore3Library
 
         protected IQueryable<TEntity> Queryable => _queryable;
 
+        private readonly ReadOnlyCollection<ManualIncludeQueryHelper.KeySelector<TEntity>> _entityPksSelectorExpression;
+
+        private readonly DbContext _dbContext;
+
+        protected DbContext DbContext => _dbContext;
+
         public IQueryable<TEntity> GetQueryable()
         {
             return _queryable;
         }
 
-        public ManualIncludableQueryable(IQueryable<TEntity> queryable)
+        public ManualIncludableQueryable(IQueryable<TEntity> queryable, DbContext dbContext)
         {
             _queryable = queryable;
+            _dbContext = dbContext;
+
+            _entityPksSelectorExpression = ManualIncludeQueryHelper.GetEntityPksSelectorExpression<TEntity>(dbContext);
+        }
+
+        private ManualIncludableQueryable(IQueryable<TEntity> queryable,
+            DbContext dbContext,
+            ReadOnlyCollection<ManualIncludeQueryHelper.KeySelector<TEntity>> entityPksSelectorExpression)
+        {
+            _queryable = queryable;
+            _dbContext = dbContext;
+            _entityPksSelectorExpression = entityPksSelectorExpression;
         }
 
         public IEnumerator<TEntity> GetEnumerator()
@@ -1073,23 +1464,18 @@ namespace EFCore3Library
             return _queryable.GetEnumerator();
         }
 
-        //IEnumerator IEnumerable.GetEnumerator()
-        //{
-        //    return GetEnumerator();
-        //}
-
-        internal IIncludedNavigationQueryChainNode<TSecondLastNavigation, TLastNavigation> CurrentNode { get; set; }
+        internal IIncludedNavigationQueryChainNode<TLastNavigation> CurrentNode { get; set; }
 
         internal List<IIncludedNavigationQueryChainNode> QueryCompletedNodes { get; set; } = new List<IIncludedNavigationQueryChainNode>();
 
-        public ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> CreateNewReplaceQueryable(IQueryable<TEntity> newQueryable)
+        public ManualIncludableQueryable<TEntity, TLastNavigation> CreateNewReplaceQueryable(IQueryable<TEntity> newQueryable)
         {
             if (newQueryable == null)
             {
                 throw new ArgumentNullException(nameof(newQueryable));
             }
 
-            var query = new ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation>(newQueryable);
+            var query = new ManualIncludableQueryable<TEntity, TLastNavigation>(newQueryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
             query.CurrentNode = this.CurrentNode;
@@ -1102,19 +1488,19 @@ namespace EFCore3Library
             return CreateNewReplaceQueryable(newQueryable);
         }
 
-        public OrderedManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> CreateNewOrderedQueryable(IOrderedQueryable<TEntity> newOrderedQueryable)
+        public OrderedManualIncludableQueryable<TEntity, TLastNavigation> CreateNewOrderedQueryable(IOrderedQueryable<TEntity> newOrderedQueryable)
         {
             if (newOrderedQueryable == null)
             {
                 throw new ArgumentNullException(nameof(newOrderedQueryable));
             }
 
-            var query = new ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation>(newOrderedQueryable);
+            var query = new ManualIncludableQueryable<TEntity, TLastNavigation>(newOrderedQueryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
             query.CurrentNode = this.CurrentNode;
 
-            var newOrderedQuery = new OrderedManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation>(query, newOrderedQueryable);
+            var newOrderedQuery = new OrderedManualIncludableQueryable<TEntity, TLastNavigation>(query, newOrderedQueryable);
 
             return newOrderedQuery;
         }
@@ -1124,8 +1510,7 @@ namespace EFCore3Library
             return CreateNewOrderedQueryable(newOrderedQueryable);
         }
 
-        public ManualIncludableQueryable<TEntity, TLastNavigation, TNextNavigation> CreateOneToManyThenIncludeQuery<TNextNavigation>(Expression<Func<TLastNavigation, IEnumerable<TNextNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+        public ManualIncludableQueryable<TEntity, TNextNavigation> CreateOneToManyThenIncludeQuery<TNextNavigation>(Expression<Func<TLastNavigation, IEnumerable<TNextNavigation>>> navigationPropertyPath)
             where TNextNavigation : class
         {
             if (CurrentNode == null)
@@ -1133,9 +1518,9 @@ namespace EFCore3Library
                 throw new Exception("Then include doesn't apply", new ArgumentNullException(nameof(CurrentNode)));
             }
 
-            var node = CurrentNode.CreateOneToManyThenIncludeNode(navigationPropertyPath, dbContext);
+            var node = CurrentNode.CreateOneToManyThenIncludeNode(navigationPropertyPath, this.DbContext);
 
-            var query = new ManualIncludableQueryable<TEntity, TLastNavigation, TNextNavigation>(this.Queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNextNavigation>(this.Queryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1144,8 +1529,7 @@ namespace EFCore3Library
             return query;
         }
 
-        public ManualIncludableQueryable<TEntity, TLastNavigation, TNextNavigation> CreateOneToManyUniqueThenIncludeQuery<TNextNavigation>(Expression<Func<TLastNavigation, TNextNavigation>> navigationPropertyPath,
-           DbContext dbContext)
+        public ManualIncludableQueryable<TEntity, TNextNavigation> CreateOneToManyUniqueThenIncludeQuery<TNextNavigation>(Expression<Func<TLastNavigation, TNextNavigation>> navigationPropertyPath)
            where TNextNavigation : class
         {
             if (CurrentNode == null)
@@ -1153,9 +1537,9 @@ namespace EFCore3Library
                 throw new Exception("Then include doesn't apply", new ArgumentNullException(nameof(CurrentNode)));
             }
 
-            var node = CurrentNode.CreateOneToManyUniqueThenIncludeNode(navigationPropertyPath, dbContext);
+            var node = CurrentNode.CreateOneToManyUniqueThenIncludeNode(navigationPropertyPath, this.DbContext);
 
-            var query = new ManualIncludableQueryable<TEntity, TLastNavigation, TNextNavigation>(this.Queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNextNavigation>(this.Queryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1164,8 +1548,7 @@ namespace EFCore3Library
             return query;
         }
 
-        public ManualIncludableQueryable<TEntity, TLastNavigation, TNextNavigation> CreateManyToOneThenIncludeQuery<TNextNavigation>(Expression<Func<TLastNavigation, TNextNavigation>> navigationPropertyPath,
-            DbContext dbContext,
+        public ManualIncludableQueryable<TEntity, TNextNavigation> CreateManyToOneThenIncludeQuery<TNextNavigation>(Expression<Func<TLastNavigation, TNextNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
             where TNextNavigation : class
@@ -1181,11 +1564,11 @@ namespace EFCore3Library
             }
 
             var node = CurrentNode.CreateManyToOneThenIncludeNode(navigationPropertyPath,
-                dbContext,
+                this.DbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
-            var query = new ManualIncludableQueryable<TEntity, TLastNavigation, TNextNavigation>(this.Queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNextNavigation>(this.Queryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1194,11 +1577,10 @@ namespace EFCore3Library
             return query;
         }
 
-        public ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+        public ManualIncludableQueryable<TEntity, TNewNavigation> CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
             where TNewNavigation : class
         {
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>(this.Queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNewNavigation>(this.Queryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1209,7 +1591,7 @@ namespace EFCore3Library
 
             var node = ManualIncludeQueryHelper.BuildOneToManyInclude<TEntity, TNewNavigation>(
                 navigationPropertyPath,
-                dbContext,
+                this.DbContext,
                 null);
 
             query.CurrentNode = node;
@@ -1217,12 +1599,12 @@ namespace EFCore3Library
             return query;
         }
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+        ManualIncludableQueryable<TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
         {
-            var realTargetType = typeof(ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>);
+            Type[] paramTypes = new Type[] { typeof(IQueryable<TEntity>), typeof(DbContext), typeof(ReadOnlyCollection<ManualIncludeQueryHelper.KeySelector<TEntity>>) };
+            object[] paramValues = new object[] { this.GetQueryable(), this.DbContext, this._entityPksSelectorExpression };
 
-            var query = (ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>)Activator.CreateInstance(realTargetType, this.GetQueryable());
+            var query = ManualIncludeQueryHelper.Construct<ManualIncludableQueryable<TEntity, TNewNavigation>>(paramTypes, paramValues);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1231,16 +1613,15 @@ namespace EFCore3Library
                 query.QueryCompletedNodes.Add(CurrentNode);
             }
 
-            query = query.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            query = query.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return query;
         }
 
-        public ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-          DbContext dbContext)
+        public ManualIncludableQueryable<TEntity, TNewNavigation> CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
           where TNewNavigation : class
         {
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>(this.Queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNewNavigation>(this.Queryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1251,7 +1632,7 @@ namespace EFCore3Library
 
             var node = ManualIncludeQueryHelper.BuildOneToManyUniqueInclude<TEntity, TNewNavigation>(
                 navigationPropertyPath,
-                dbContext,
+                this.DbContext,
                 null);
 
             query.CurrentNode = node;
@@ -1259,12 +1640,12 @@ namespace EFCore3Library
             return query;
         }
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext)
+        ManualIncludableQueryable<TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
         {
-            var realTargetType = typeof(ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>);
+            Type[] paramTypes = new Type[] { typeof(IQueryable<TEntity>), typeof(DbContext), typeof(ReadOnlyCollection<ManualIncludeQueryHelper.KeySelector<TEntity>>) };
+            object[] paramValues = new object[] { this.GetQueryable(), this.DbContext, this._entityPksSelectorExpression };
 
-            var query = (ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>)Activator.CreateInstance(realTargetType, this.GetQueryable());
+            var query = ManualIncludeQueryHelper.Construct<ManualIncludableQueryable<TEntity, TNewNavigation>>(paramTypes, paramValues);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1273,13 +1654,12 @@ namespace EFCore3Library
                 query.QueryCompletedNodes.Add(CurrentNode);
             }
 
-            query = query.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext);
+            query = query.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
 
             return query;
         }
 
-        public ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
+        public ManualIncludableQueryable<TEntity, TNewNavigation> CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
            where TNewNavigation : class
@@ -1289,7 +1669,7 @@ namespace EFCore3Library
                 throw new ArgumentException(nameof(TNewNavigation));
             }
 
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>(this.Queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNewNavigation>(this.Queryable, this.DbContext, this._entityPksSelectorExpression);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1300,7 +1680,7 @@ namespace EFCore3Library
 
             var node = ManualIncludeQueryHelper.BuildManyToOneInclude<TEntity, TNewNavigation>(
                 navigationPropertyPath,
-                dbContext,
+                this.DbContext,
                 null,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
@@ -1310,14 +1690,14 @@ namespace EFCore3Library
             return query;
         }
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext,
+        ManualIncludableQueryable<TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne,
             bool isInvokeDistinctInMemory)
         {
-            var realTargetType = typeof(ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>);
+            Type[] paramTypes = new Type[] { typeof(IQueryable<TEntity>), typeof(DbContext), typeof(ReadOnlyCollection<ManualIncludeQueryHelper.KeySelector<TEntity>>) };
+            object[] paramValues = new object[] { this.GetQueryable(), this.DbContext, this._entityPksSelectorExpression };
 
-            var query = (ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>)Activator.CreateInstance(realTargetType, this.GetQueryable());
+            var query = ManualIncludeQueryHelper.Construct<ManualIncludableQueryable<TEntity, TNewNavigation>>(paramTypes, paramValues);
 
             query.QueryCompletedNodes.AddRange(this.QueryCompletedNodes.ToList());
 
@@ -1326,17 +1706,17 @@ namespace EFCore3Library
                 query.QueryCompletedNodes.Add(CurrentNode);
             }
 
-            query = query.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath, dbContext, isOneToOne: isOneToOne, isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+            query = query.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath, isOneToOne: isOneToOne, isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
             return query;
         }
 
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateFirstOneToManyIncludeChainQuery<TNewNavigation>(IQueryable<TEntity> queryable,
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> CreateFirstOneToManyIncludeChainQuery<TNewNavigation>(IQueryable<TEntity> queryable,
             Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
             DbContext dbContext)
             where TNewNavigation : class
         {
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>(queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNewNavigation>(queryable, dbContext);
 
             var node = ManualIncludeQueryHelper.BuildOneToManyInclude<TEntity, TNewNavigation>(
                 navigationPropertyPath,
@@ -1348,12 +1728,12 @@ namespace EFCore3Library
             return query;
         }
 
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateFirstOneToManyUniqueIncludeChainQuery<TNewNavigation>(IQueryable<TEntity> queryable,
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> CreateFirstOneToManyUniqueIncludeChainQuery<TNewNavigation>(IQueryable<TEntity> queryable,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             DbContext dbContext)
             where TNewNavigation : class
         {
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>(queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNewNavigation>(queryable, dbContext);
 
             var node = ManualIncludeQueryHelper.BuildOneToManyUniqueInclude<TEntity, TNewNavigation>(
                 navigationPropertyPath,
@@ -1365,7 +1745,7 @@ namespace EFCore3Library
             return query;
         }
 
-        public static ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> CreateFirstManyToOneIncludeChainQuery<TNewNavigation>(IQueryable<TEntity> queryable,
+        public static ManualIncludableQueryable<TEntity, TNewNavigation> CreateFirstManyToOneIncludeChainQuery<TNewNavigation>(IQueryable<TEntity> queryable,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isOneToOne = false,
@@ -1377,7 +1757,7 @@ namespace EFCore3Library
                 throw new ArgumentException(nameof(TNewNavigation));
             }
 
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TNewNavigation>(queryable);
+            var query = new ManualIncludableQueryable<TEntity, TNewNavigation>(queryable, dbContext);
 
             var node = ManualIncludeQueryHelper.BuildManyToOneInclude<TEntity, TNewNavigation>(
                 navigationPropertyPath,
@@ -1391,157 +1771,152 @@ namespace EFCore3Library
             return query;
         }
 
-        public static ManualIncludableQueryable<TEntity, TEntity, TEntity> CreateEmptyManualIncludableQueryable(IQueryable<TEntity> queryable)
+        public static ManualIncludableQueryable<TEntity, TEntity> CreateEmptyManualIncludableQueryable(IQueryable<TEntity> queryable, DbContext dbContext)
         {
-            var query = new ManualIncludableQueryable<TEntity, TEntity, TEntity>(queryable);
+            var query = new ManualIncludableQueryable<TEntity, TEntity>(queryable, dbContext);
 
             return query;
         }
 
         public List<TEntity> InvokeQueryToList()
         {
-            var entities = _queryable.ToList();
-            IncludeAllNavigations(entities);
+            var queryableWithOneToOneIncludes = BuildEntityQueryWithAllOneToOneIncludes(_queryable);
+
+            var entities = queryableWithOneToOneIncludes.EntityQueryaleWithOneToOneIncludes.ToList();
+
+            var loadedEntityQueryOneToOneNavigationInfos = GetEntityQueryLoadedneToOneNavigationInfos(entities,
+                queryableWithOneToOneIncludes.AllOneToOneAutoIncludes);
+
+            IncludeAllNavigations(entities, null, loadedEntityQueryOneToOneNavigationInfos);
             return entities;
         }
 
         public TEntity[] InvokeQueryToArray()
         {
-            var entities = _queryable.ToArray();
-            IncludeAllNavigations(entities);
+            var queryableWithOneToOneIncludes = BuildEntityQueryWithAllOneToOneIncludes(_queryable);
+
+            var entities = queryableWithOneToOneIncludes.EntityQueryaleWithOneToOneIncludes.ToArray();
+
+            var loadedEntityQueryOneToOneNavigationInfos = GetEntityQueryLoadedneToOneNavigationInfos(entities,
+                queryableWithOneToOneIncludes.AllOneToOneAutoIncludes);
+
+            IncludeAllNavigations(entities, null, loadedEntityQueryOneToOneNavigationInfos);
+
             return entities;
         }
 
         public TEntity InvokeQueryFirstOrDefault()
         {
-            var entity = _queryable.FirstOrDefault();
-
-            if (entity != null)
-            {
-                IncludeAllNavigations(new TEntity[] { entity }, _queryable.Take(1));
-            }
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.FirstOrDefault());
         }
 
         public TEntity InvokeQueryFirstOrDefault(Expression<Func<TEntity, bool>> predicate)
         {
-            var entity = _queryable.FirstOrDefault(predicate);
-
-            if (entity != null)
-            {
-                IncludeAllNavigations(new TEntity[] { entity }, _queryable.Where(predicate).Take(1));
-            }
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.FirstOrDefault(predicate));
         }
 
         public TEntity InvokeQueryFirst()
         {
-            var entity = _queryable.First();
-
-            IncludeAllNavigations(new TEntity[] { entity }, _queryable.Take(1));
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.First());
         }
 
         public TEntity InvokeQueryFirst(Expression<Func<TEntity, bool>> predicate)
         {
-            var entity = _queryable.First(predicate);
-
-            IncludeAllNavigations(new TEntity[] { entity }, _queryable.Where(predicate).Take(1));
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.First(predicate));
         }
 
         public TEntity InvokeQueryLastOrDefault()
         {
-            var entity = _queryable.LastOrDefault();
-
-            if (entity != null)
-            {
-                IncludeAllNavigations(new TEntity[] { entity }, _queryable.TakeLast(1));
-            }
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.LastOrDefault());
         }
 
         public TEntity InvokeQueryLastOrDefault(Expression<Func<TEntity, bool>> predicate)
         {
-            var entity = _queryable.LastOrDefault(predicate);
-
-            if (entity != null)
-            {
-                IncludeAllNavigations(new TEntity[] { entity }, _queryable.Where(predicate).TakeLast(1));
-            }
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.LastOrDefault(predicate));
         }
 
         public TEntity InvokeQueryLast()
         {
-            var entity = _queryable.Last();
-
-            IncludeAllNavigations(new TEntity[] { entity }, _queryable.TakeLast(1));
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.Last());
         }
 
         public TEntity InvokeQueryLast(Expression<Func<TEntity, bool>> predicate)
         {
-            var entity = _queryable.Last(predicate);
-
-            IncludeAllNavigations(new TEntity[] { entity }, _queryable.Where(predicate).TakeLast(1));
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.Last(predicate));
         }
 
         public TEntity InvokeQuerySingleOrDefault()
         {
-            var entity = _queryable.SingleOrDefault();
-
-            if (entity != null)
-            {
-                IncludeAllNavigations(new TEntity[] { entity }, _queryable.Take(1));
-            }
-
-            return entity;
+            return InvokeQueryTakeOneCore(x => x.SingleOrDefault());
         }
 
         public TEntity InvokeQuerySingleOrDefault(Expression<Func<TEntity, bool>> predicate)
         {
-            var entity = _queryable.SingleOrDefault(predicate);
+            return InvokeQueryTakeOneCore(x => x.SingleOrDefault(predicate));
+        }
+
+        public TEntity InvokeQuerySingle()
+        {
+            return InvokeQueryTakeOneCore(x => x.Single());
+        }
+
+        public TEntity InvokeQuerySingle(Expression<Func<TEntity, bool>> predicate)
+        {
+            return InvokeQueryTakeOneCore(x => x.Single(predicate));
+        }
+
+        private TEntity InvokeQueryTakeOneCore(Func<IQueryable<TEntity>, TEntity> invokeQueryFunc)
+        {
+            var queryableWithOneToOneIncludes = BuildEntityQueryWithAllOneToOneIncludes(_queryable);
+
+            var entity = invokeQueryFunc(queryableWithOneToOneIncludes.EntityQueryaleWithOneToOneIncludes);
 
             if (entity != null)
             {
-                IncludeAllNavigations(new TEntity[] { entity }, _queryable.Where(predicate).Take(1));
+                var overwriteQuery = BuildOverwriteTakeOneQuery(entity);
+
+                var loadedEntityQueryOneToOneNavigationInfos = GetEntityQueryLoadedneToOneNavigationInfos(new TEntity[] { entity },
+                    queryableWithOneToOneIncludes.AllOneToOneAutoIncludes);
+
+                IncludeAllNavigations(new TEntity[] { entity }, overwriteQuery, loadedEntityQueryOneToOneNavigationInfos);
             }
 
             return entity;
         }
 
-        public TEntity InvokeQuerySingle()
+        private IQueryable<TEntity> BuildOverwriteTakeOneQuery(TEntity entity)
         {
-            var entity = _queryable.Single();
+            if (_entityPksSelectorExpression == null || _entityPksSelectorExpression.Count == 0)
+            {
+                return _queryable;
+            }
 
-            IncludeAllNavigations(new TEntity[] { entity }, _queryable.Take(1));
+            var isTracking = _queryable.GetIsTracking(_dbContext);
 
-            return entity;
+            var query = _dbContext.Set<TEntity>()
+               .AsQueryable();
+
+            if (!isTracking)
+            {
+                query = query.AsNoTracking();
+            }
+
+            foreach (var pkSelector in _entityPksSelectorExpression)
+            {
+                var keyValue = pkSelector.UntypedGetter(entity);
+
+                var filterExpression = ManualIncludeQueryHelper.ConvertToEqualsExpr(pkSelector.LambdaExpression, keyValue);
+
+                query = System.Linq.Queryable.Where(query, (dynamic)filterExpression);
+            }
+
+            return query;
         }
 
-        public TEntity InvokeQuerySingle(Expression<Func<TEntity, bool>> predicate)
+        private List<List<IIncludedNavigationQueryChainNode>> _cachedAllIncludableOrderedChains = null;
+
+        private List<List<IIncludedNavigationQueryChainNode>> BuildAllIncludableOrderedChains()
         {
-            var entity = _queryable.Single(predicate);
-
-            IncludeAllNavigations(new TEntity[] { entity }, _queryable.Where(predicate).Take(1));
-
-            return entity;
-        }
-
-        private void IncludeAllNavigations(IEnumerable<TEntity> entities, IQueryable<TEntity> overwriteQueryable = null)
-        {
-            var sourceQuery = overwriteQueryable ?? _queryable;
-
             var allIncludable = QueryCompletedNodes.ToList();
 
             if (CurrentNode != null && !allIncludable.Contains(CurrentNode))
@@ -1549,38 +1924,142 @@ namespace EFCore3Library
                 allIncludable.Add(CurrentNode);
             }
 
-            var loadedNavigations = new List<LoadedNavigationType>();
+            var allIncludableChains = allIncludable
+                .Select(x => ManualIncludeQueryHelper.GetOrderedIIncludedNavigationQueryChainFromLastNode(x))
+                .ToList();
 
-            foreach (var includable in allIncludable)
+            _cachedAllIncludableOrderedChains = allIncludableChains;
+
+            return allIncludableChains;
+        }
+
+        private ManualIncludeQueryHelper.BuildQueryWithAllOneToOneIncludesResult<TEntity> BuildEntityQueryWithAllOneToOneIncludes(IQueryable<TEntity> source)
+        {
+            if (source == null)
             {
-                if (entities == null || !entities.Any())
+                return null;
+            }
+
+            var result = new ManualIncludeQueryHelper.BuildQueryWithAllOneToOneIncludesResult<TEntity>
+            {
+                EntityQueryaleWithOneToOneIncludes = source,
+            };
+
+            if (!IsCombineOneToOneQueryUsingEFInclude)
+            {
+                return result;
+            }
+
+            var allIncludableChains = _cachedAllIncludableOrderedChains ?? BuildAllIncludableOrderedChains();
+
+            if (allIncludableChains == null || !allIncludableChains.Any())
+            {
+                return result;
+            }
+
+            var query = source;
+
+            foreach (var includable in allIncludableChains)
+            {
+                var oneToOneNodesChain = new List<IIncludedNavigationQueryChainNode>();
+
+                var pointer = includable[0];
+
+                while (pointer != null && pointer.IsOneToOne)
                 {
-                    continue;
+                    oneToOneNodesChain.Add(pointer);
+
+                    pointer = pointer.NextNode;
                 }
 
-                var chain = new List<IIncludedNavigationQueryChainNode>();
-
-                chain.Add(includable);
-
-                var pointer = includable;
-
-                while (pointer.PreviousNode != null)
+                if (oneToOneNodesChain.Count > 0)
                 {
-                    chain.Insert(0, pointer.PreviousNode);
-                    pointer = pointer.PreviousNode;
-                }
+                    result.AllOneToOneAutoIncludes.Add(oneToOneNodesChain);
 
+                    var navigationPath = ManualIncludeQueryHelper.GetIncludeChainNavigationPath(oneToOneNodesChain);
+
+                    query = query.Include(navigationPath);
+                }
+            }
+
+            result.EntityQueryaleWithOneToOneIncludes = query;
+
+            return result;
+        }
+
+        private List<ManualIncludeQueryHelper.LoadedNavigationInfo> GetEntityQueryLoadedneToOneNavigationInfos(IEnumerable<TEntity> entities,
+            List<List<IIncludedNavigationQueryChainNode>> allOneToOneAutoIncludes,
+            IQueryable<TEntity> overwriteQueryable = null)
+        {
+            var result = new List<ManualIncludeQueryHelper.LoadedNavigationInfo>();
+
+            if (entities == null || !entities.Any())
+            {
+                return result;
+            }
+
+            foreach (var chain in allOneToOneAutoIncludes)
+            {
+                IQueryable previousQueryPointer = overwriteQueryable ?? _queryable;
+                IEnumerable<object> previousNavigationsPointer = entities;
+
+                foreach (var oneToOneNode in chain)
+                {
+                    var loadedNavigationsCurrentLevel = oneToOneNode.GetLoadedNavigationsNoType(previousNavigationsPointer);
+
+                    var currentQuery = oneToOneNode.BuildNavigationQueryNoType(previousQueryPointer,
+                        isUseJoin: IsCombineOneToOneQueryUsingEFInclude);
+
+                    result.Add(new ManualIncludeQueryHelper.LoadedNavigationInfo
+                    {
+                        LastEntityType = oneToOneNode.LastEntityType,
+                        LastNavigationType = oneToOneNode.LastNavigationType,
+                        LastEntityOffsetFromFirstEntity = oneToOneNode.LastEntityOffsetFromFirstEntity,
+                        FKName = oneToOneNode.FKName,
+                        FKNameChain = oneToOneNode.FKNameChain,
+                        LoadedNavigations = loadedNavigationsCurrentLevel.ToList(),
+                        CurrentQuery = currentQuery,
+                    });
+
+                    previousNavigationsPointer = loadedNavigationsCurrentLevel;
+                    previousQueryPointer = currentQuery;
+                }
+            }
+
+            return result;
+        }
+
+        private void IncludeAllNavigations(IEnumerable<TEntity> entities,
+            IQueryable<TEntity> overwriteQueryable = null,
+            IEnumerable<ManualIncludeQueryHelper.LoadedNavigationInfo> loadedEntityQueryOneToOneNavigationInfos = null)
+        {
+            if (entities == null || !entities.Any())
+            {
+                return;
+            }
+
+            var sourceQuery = overwriteQueryable ?? _queryable;
+
+            var allIncludableChains = _cachedAllIncludableOrderedChains ?? BuildAllIncludableOrderedChains();
+
+            var loadedNavigations = new List<ManualIncludeQueryHelper.LoadedNavigationInfo>();
+
+            if (loadedEntityQueryOneToOneNavigationInfos != null && loadedEntityQueryOneToOneNavigationInfos.Any())
+            {
+                loadedNavigations.AddRange(loadedEntityQueryOneToOneNavigationInfos);
+            }
+
+            foreach (var chain in allIncludableChains)
+            {
                 IEnumerable<object> previousEntities = null;
                 IQueryable previousQuery = null;
 
                 foreach (var node in chain)
                 {
-                    var fkNameChain = ManualIncludeQueryHelper.GetIIncludedNavigationQueryChainNodeFKNameChain(node);
-
                     var sameNavigationLoaded = loadedNavigations
                         .Where(x => x.LastNavigationType == node.LastNavigationType)
                         .Where(x => x.LastEntityType == node.LastEntityType)
-                        .Where(x => x.FKNameChain == fkNameChain)
+                        .Where(x => x.FKNameChain == node.FKNameChain)
                         .Where(x => x.LastEntityOffsetFromFirstEntity == node.LastEntityOffsetFromFirstEntity)
                         .FirstOrDefault();
 
@@ -1590,51 +2069,29 @@ namespace EFCore3Library
                             .Where(x => x.LastNavigationType == node.LastNavigationType)
                             .SelectMany(x => x.LoadedNavigations);
 
+                        if (typeof(TEntity) == node.LastNavigationType)
+                        {
+                            otherLoadedNavigations = otherLoadedNavigations.Concat(entities);
+                        }
+
                         var invokeResult = node.InvokeQueryNoType(previousEntities ?? entities,
+                            this.IsCombineOneToOneQueryUsingEFInclude,
                             previousQuery ?? sourceQuery,
                             otherLoadedNavigations);
 
-                        previousEntities = invokeResult;
+                        previousEntities = invokeResult.Navigations;
                         previousQuery = node.CachedNavigationQueryNoType;
 
-                        loadedNavigations.Add(new LoadedNavigationType
-                        {
-                            LastEntityType = node.LastEntityType,
-                            LastNavigationType = node.LastNavigationType,
-                            LastEntityOffsetFromFirstEntity = node.LastEntityOffsetFromFirstEntity,
-                            FKName = node.FKName,
-                            FKNameChain = fkNameChain,
-                            LoadedNavigations = invokeResult,
-                            PreviousQuery = previousQuery,
-                        });
+                        loadedNavigations.AddRange(invokeResult.LoadedNavigations);
                     }
                     else
                     {
-                        //var loadedEntities = node.GetLoadedNavigationsNoType(previousEntities ?? entities);
                         var loadedEntities = sameNavigationLoaded.LoadedNavigations;
                         previousEntities = loadedEntities;
-                        previousQuery = sameNavigationLoaded.PreviousQuery;
+                        previousQuery = sameNavigationLoaded.CurrentQuery;
                     }
                 }
             }
-        }
-
-        private class LoadedNavigationType
-        {
-            public Type LastEntityType { get; set; }
-            public Type LastNavigationType { get; set; }
-
-            public string FKName { get; set; }
-
-            public string FKNameChain { get; set; }
-
-            public int LastEntityOffsetFromFirstEntity { get; set; }
-
-            public LambdaExpression PKSelector { get; set; }
-
-            public IEnumerable<object> LoadedNavigations { get; set; } = new List<object>();
-
-            public IQueryable PreviousQuery { get; set; }
         }
     }
 
@@ -1646,16 +2103,15 @@ namespace EFCore3Library
         IOrderedManualIncludableQueryable<TEntity> CreateNewReplaceOrdredQueryable(IOrderedQueryable<TEntity> newOrderedQueryable);
     }
 
-    public class OrderedManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> : IOrderedManualIncludableQueryable<TEntity>
+    public class OrderedManualIncludableQueryable<TEntity, TLastNavigation> : IOrderedManualIncludableQueryable<TEntity>
         where TEntity : class
-        where TSecondLastNavigation : class
         where TLastNavigation : class
     {
         private readonly IOrderedQueryable<TEntity> _orderedQueryable;
 
-        private readonly ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> _manualIncludableQueryable;
+        private readonly ManualIncludableQueryable<TEntity, TLastNavigation> _manualIncludableQueryable;
 
-        protected ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> ManualIncludableQueryable => _manualIncludableQueryable;
+        protected ManualIncludableQueryable<TEntity, TLastNavigation> ManualIncludableQueryable => _manualIncludableQueryable;
 
         public IOrderedQueryable<TEntity> GetOrderedQueryable()
         {
@@ -1667,7 +2123,7 @@ namespace EFCore3Library
             return _orderedQueryable;
         }
 
-        public OrderedManualIncludableQueryable(ManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation> manualIncludeQueryable,
+        public OrderedManualIncludableQueryable(ManualIncludableQueryable<TEntity, TLastNavigation> manualIncludeQueryable,
             IOrderedQueryable<TEntity> orderedQueryable)
         {
             this._orderedQueryable = orderedQueryable;
@@ -1695,7 +2151,7 @@ namespace EFCore3Library
 
             var newManualIncludableQueryable = this.ManualIncludableQueryable.CreateNewReplaceQueryable(newOrderedQueryable);
 
-            var query = new OrderedManualIncludableQueryable<TEntity, TSecondLastNavigation, TLastNavigation>(newManualIncludableQueryable, newOrderedQueryable);
+            var query = new OrderedManualIncludableQueryable<TEntity, TLastNavigation>(newManualIncludableQueryable, newOrderedQueryable);
 
             return query;
         }
@@ -1705,27 +2161,21 @@ namespace EFCore3Library
             return CreateNewOrderedQueryable(newOrderedQueryable);
         }
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath,
-            DbContext dbContext)
+        ManualIncludableQueryable<TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
         {
-            return this.ManualIncludableQueryable.CreateNewOneToManyIncludeChainQuery(navigationPropertyPath,
-                dbContext);
+            return this.ManualIncludableQueryable.CreateNewOneToManyIncludeChainQuery(navigationPropertyPath);
         }
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            DbContext dbContext)
+        ManualIncludableQueryable<TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
         {
-            return this.ManualIncludableQueryable.CreateNewOneToManyUniqueIncludeChainQuery(navigationPropertyPath,
-                dbContext);
+            return this.ManualIncludableQueryable.CreateNewOneToManyUniqueIncludeChainQuery(navigationPropertyPath);
         }
 
-        ManualIncludableQueryable<TEntity, TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-             DbContext dbContext,
+        ManualIncludableQueryable<TEntity, TNewNavigation> IManualIncludableQueryable<TEntity>.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
              bool isOneToOne,
              bool isInvokeDistinctInMemory)
         {
             return this.ManualIncludableQueryable.CreateNewManyToOneIncludeChainQuery(navigationPropertyPath,
-                dbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
         }
@@ -1805,6 +2255,25 @@ namespace EFCore3Library
 
     internal static class ManualIncludeQueryHelper
     {
+        internal static ReadOnlyCollection<KeySelector<TEntity>> GetEntityPksSelectorExpression<TEntity>(DbContext dbContext)
+        {
+            var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
+
+            var entityPks = entityType.FindPrimaryKey();
+
+            var pksSelector = entityPks.Properties
+                .Select(entityPk => new KeySelector<TEntity>
+                {
+                    LambdaExpression = GetPropertySelector<TEntity>(entityPk.Name),
+                    UntypedGetter = BuildUntypedGetter<TEntity>(entityPk.PropertyInfo),
+                })
+                .ToList();
+
+            var result = new ReadOnlyCollection<KeySelector<TEntity>>(pksSelector);
+
+            return result;
+        }
+
         public static OneToManyIncludeQueryChainNode<TEntity, TNavigation> BuildOneToManyInclude<TEntity, TNavigation>(
             Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
             DbContext dbContext,
@@ -1863,7 +2332,7 @@ namespace EFCore3Library
             }
 
             var entityPk = entityPks.Properties
-                //If include bridge table, like building.ManagerBuildings, the pk > 1, so search pk by name
+                //If it's the include bridge table the pk > 1, search pk by name
                 .Single();
 
             var pkSelector = BuildUntypedGetter<TEntity>(entityPk.PropertyInfo);
@@ -1882,16 +2351,16 @@ namespace EFCore3Library
             }
             else
             {
-                //If more than one PK, for now it must be the bridge table, like Building.ManagerBuildings
-                //So use FK to search the navigation PK (linked)
-
                 var navigationPksFksMapping = navigationPks.Properties
                     .Select(x => new { PK = x, FKs = x.GetContainingForeignKeys() })
                     .ToList();
 
                 var navigationPkCandidates = navigationPksFksMapping
-
-                    .Where(x => x.FKs.Count() == 1 && x.FKs.Any(f => f.PrincipalEntityType == entityType && f.PrincipalKey.Properties.Count == 1 && f.PrincipalKey.Properties.Single().Name == entityPk.Name))
+                    .Where(x => x.FKs.Count() == 1 && x.FKs.Any(f => f.PrincipalEntityType == entityType
+                        && f.PrincipalKey.Properties.Count == 1
+                        && f.PrincipalKey.Properties.Single().Name == entityPk.Name
+                        && f.Properties.Count == 1
+                        && f.Properties.Single().Name == fkName))
                     .Select(x => x.PK)
                     .ToList();
 
@@ -1921,7 +2390,12 @@ namespace EFCore3Library
                 navigationInversePkPropertyInfoSetter: BuildUntypedSetter<TNavigation>(inversePkNavigationPropertyInfo),
                 fkName: fkName,
                 pkSelector: pkSelector,
+                //use fk type which is nullable
+                pkSelectorExpressionForJoin: GetPropertySelector<TEntity>(entityPk.Name, entityPk.PropertyInfo.PropertyType, navigationForeignKeyProperty.PropertyInfo.PropertyType),
+                pkType: entityPk.PropertyInfo.PropertyType,
                 fkSelector: fkSelector,
+                fkSelectorExpression: GetPropertySelector<TNavigation>(fkName, navigationForeignKeyProperty.PropertyInfo.PropertyType),
+                fkType: navigationForeignKeyProperty.PropertyInfo.PropertyType,
                 navigationPKInverseEntityFKSelector: navigationPkSelector,
                 navigationPKSelectors: navigationPksSelector,
                 dbContext: dbContext,
@@ -1965,10 +2439,6 @@ namespace EFCore3Library
 
             var navigationPropertySelector = GetPropertySelector<TEntity, TNavigation>(navigationPropertyInfo.Name);
 
-            //var inversePkNavigationProperty = navigationForeignKey.DependentToPrincipal;
-
-            //var inversePkNavigationPropertyInfo = inversePkNavigationProperty.PropertyInfo;
-
             var navigationType = dbContext.Model.FindEntityType(typeof(TNavigation).FullName);
 
             if (navigationType.FindPrimaryKey().Properties.Count != 1)
@@ -1989,6 +2459,8 @@ namespace EFCore3Library
             var pkValueSelector = BuildUntypedGetter<TNavigation>(pkProperty.PropertyInfo);
             var fkFastSelector = BuildUntypedGetter<TEntity>(navigationForeignKeyPropertyInfo);
 
+            var isFKNullable = IsNullableType(navigationForeignKeyPropertyInfo.PropertyType);
+
             var manyToOneIncludeQueryChain = new ManyToOneIncludeQueryChainNode<TEntity, TNavigation>
             (
                 previousNode: previousNode,
@@ -2000,8 +2472,14 @@ namespace EFCore3Library
                 navigationPropertyInfoSetter: BuildUntypedSetter<TEntity>(navigationPropertyInfo),
                 pkName: pkName,
                 fkName: fkName,
+                isNullableFk: isFKNullable,
                 pKSelector: pkValueSelector,
+                //use fk type which is nullable
+                pkSelectorExpressionForJoin: GetPropertySelector<TNavigation>(pkName, pkProperty.PropertyInfo.PropertyType, navigationForeignKeyProperty.PropertyInfo.PropertyType),
+                pkType: pkProperty.PropertyInfo.PropertyType,
                 fKSelector: fkFastSelector,
+                fkSelectorExpression: GetPropertySelector<TEntity>(fkName, navigationForeignKeyProperty.PropertyInfo.PropertyType),
+                fkType: navigationForeignKeyProperty.PropertyInfo.PropertyType,
                 dbContext: dbContext,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory
@@ -2068,7 +2546,7 @@ namespace EFCore3Library
             }
 
             var entityPk = entityPks.Properties
-                //If include bridge table, like building.ManagerBuildings, the pk > 1, so search pk by name
+                //If include bridge table, the pk > 1, so search pk by name
                 .Single();
 
             var pkSelector = BuildUntypedGetter<TEntity>(entityPk.PropertyInfo);
@@ -2087,8 +2565,7 @@ namespace EFCore3Library
             }
             else
             {
-                //If more than one PK, for now it must be the bridge table, like Building.ManagerBuildings
-                //So use FK to search the navigation PK (linked)
+                //If more than one PK, like the bridge table, use FK to search the navigation PK (linked)
 
                 var navigationPksFksMapping = navigationPks.Properties
                     .Select(x => new { PK = x, FKs = x.GetContainingForeignKeys() })
@@ -2126,7 +2603,12 @@ namespace EFCore3Library
                 navigationInversePkPropertyInfoSetter: BuildUntypedSetter<TNavigation>(inversePkNavigationPropertyInfo),
                 fkName: fkName,
                 pkSelector: pkSelector,
+                //use fk type which is nullable
+                pkSelectorExpressionForJoin: GetPropertySelector<TEntity>(entityPk.Name, entityPk.PropertyInfo.PropertyType, navigationForeignKeyProperty.PropertyInfo.PropertyType),
+                pkType: entityPk.PropertyInfo.PropertyType,
                 fkSelector: fkSelector,
+                fkSelectorExpression: GetPropertySelector<TNavigation>(fkName, navigationForeignKeyProperty.PropertyInfo.PropertyType),
+                fkType: navigationForeignKeyProperty.PropertyInfo.PropertyType,
                 navigationPKInverseEntityFKSelector: navigationPkSelector,
                 navigationPKSelectors: navigationPksSelector,
                 dbContext: dbContext,
@@ -2136,7 +2618,187 @@ namespace EFCore3Library
             return oneToManyIncludeQueryChain;
         }
 
-        public static string GetIIncludedNavigationQueryChainNodeFKNameChain(IIncludedNavigationQueryChainNode node)
+        public static IncludedNavigationQueryChainNodeInvokeQueryResult<T> InvokeQueryCore<T>(IIncludedNavigationQueryChainNode<T> node,
+            IQueryable<T> filteredNavigationQuery,
+            IQueryable<T> originalNavigationQuery,
+            bool isCombineOneToOneQueryUsingEFInclude,
+            IEnumerable<T> loadedNavigationsFilteredForThisInclude)
+            where T : class
+        {
+            if (filteredNavigationQuery == null)
+            {
+                throw new ArgumentNullException(nameof(filteredNavigationQuery));
+            }
+
+            if (originalNavigationQuery == null)
+            {
+                throw new ArgumentNullException(nameof(originalNavigationQuery));
+            }
+
+            if (node == null)
+            {
+                throw new ArgumentNullException(nameof(node));
+            }
+
+            var oneToOneNodesChain = new List<IIncludedNavigationQueryChainNode>();
+
+            if (isCombineOneToOneQueryUsingEFInclude)
+            {
+                var pointer = (IIncludedNavigationQueryChainNode)node;
+
+                while (pointer.NextNode != null && pointer.NextNode.IsOneToOne)
+                {
+                    oneToOneNodesChain.Add(pointer.NextNode);
+
+                    pointer = pointer.NextNode;
+                }
+            }
+
+            var hasLoadedNavigations = loadedNavigationsFilteredForThisInclude != null && loadedNavigationsFilteredForThisInclude.Any();
+
+            var canCombineOneToOneIncludes = false;
+
+            if (oneToOneNodesChain.Count > 0)
+            {
+                canCombineOneToOneIncludes = true;
+
+                if (hasLoadedNavigations)
+                {
+                    canCombineOneToOneIncludes = CanCombineOneToOneIncludeForLoadedNavigations(loadedNavigationsFilteredForThisInclude, oneToOneNodesChain) ?? false;
+                }
+            }
+
+            var result = new IncludedNavigationQueryChainNodeInvokeQueryResult<T>();
+
+            if (hasLoadedNavigations)
+            {
+                result.Navigations.AddRange(loadedNavigationsFilteredForThisInclude);
+            }
+
+            var includeQuery = filteredNavigationQuery;
+
+            if (canCombineOneToOneIncludes)
+            {
+                var navigationPath = GetIncludeChainNavigationPath(oneToOneNodesChain);
+
+                includeQuery = includeQuery.Include(navigationPath);
+            }
+
+            var navigations = includeQuery.ToList();
+
+            result.Navigations.AddRange(navigations);
+
+            result.LoadedNavigations.Add(new LoadedNavigationInfo
+            {
+                LastEntityType = node.LastEntityType,
+                LastNavigationType = node.LastNavigationType,
+                LastEntityOffsetFromFirstEntity = node.LastEntityOffsetFromFirstEntity,
+                FKName = node.FKName,
+                FKNameChain = node.FKNameChain,
+                LoadedNavigations = result.Navigations,
+                CurrentQuery = originalNavigationQuery,
+            });
+
+            if (canCombineOneToOneIncludes)
+            {
+                IQueryable previousQueryPointer = includeQuery;
+                IEnumerable<object> previousNavigationsPointer = result.Navigations;
+
+                foreach (var oneToOneNode in oneToOneNodesChain)
+                {
+                    var loadedNavigationsCurrentLevel = oneToOneNode.GetLoadedNavigationsNoType(previousNavigationsPointer);
+
+                    var currentLevelQuery = oneToOneNode.BuildNavigationQueryNoType(previousQueryPointer,
+                        isUseJoin: isCombineOneToOneQueryUsingEFInclude);
+
+                    result.LoadedNavigations.Add(new LoadedNavigationInfo
+                    {
+                        LastEntityType = oneToOneNode.LastEntityType,
+                        LastNavigationType = oneToOneNode.LastNavigationType,
+                        LastEntityOffsetFromFirstEntity = oneToOneNode.LastEntityOffsetFromFirstEntity,
+                        FKName = oneToOneNode.FKName,
+                        FKNameChain = oneToOneNode.FKNameChain,
+                        LoadedNavigations = loadedNavigationsCurrentLevel.ToList(),
+                        CurrentQuery = currentLevelQuery,
+                    });
+
+                    previousNavigationsPointer = loadedNavigationsCurrentLevel;
+                    previousQueryPointer = currentLevelQuery;
+                }
+            }
+
+            return result;
+        }
+
+        public static string GetIncludeChainNavigationPath(List<IIncludedNavigationQueryChainNode> orderedIncludeChain)
+        {
+            if (orderedIncludeChain == null || !orderedIncludeChain.Any())
+            {
+                return null;
+            }
+
+            var stringBuilder = new StringBuilder();
+
+            foreach (var item in orderedIncludeChain)
+            {
+                if (stringBuilder.Length > 0)
+                {
+                    stringBuilder.Append(".");
+                }
+
+                stringBuilder.Append(item.NavigationPropertyName);
+            }
+
+            return stringBuilder.ToString();
+        }
+
+        private static bool? CanCombineOneToOneIncludeForLoadedNavigations(IEnumerable<object> loadedNavigations,
+            List<IIncludedNavigationQueryChainNode> oneToOneNodesChain)
+        {
+            var hasNavigations = loadedNavigations != null && loadedNavigations.Any();
+
+            if (!hasNavigations)
+            {
+                return null;
+            }
+
+            if (oneToOneNodesChain.Count == 0)
+            {
+                return null;
+            }
+
+            IEnumerable<object> navigationsPointer = loadedNavigations;
+
+            bool? isAllLevelOneToOneNavigationsFullyLoaded = null;
+
+            foreach (var oneToOneNode in oneToOneNodesChain)
+            {
+                var isCurrentLevelFullyLoaded = oneToOneNode.IsAllNavigationsLoadedNoType(navigationsPointer);
+
+                if (isCurrentLevelFullyLoaded.HasValue)
+                {
+                    isAllLevelOneToOneNavigationsFullyLoaded = isAllLevelOneToOneNavigationsFullyLoaded.HasValue
+                        ? isAllLevelOneToOneNavigationsFullyLoaded.Value && isCurrentLevelFullyLoaded.Value
+                        : isCurrentLevelFullyLoaded.Value;
+                }
+
+                if (isAllLevelOneToOneNavigationsFullyLoaded == false)
+                {
+                    break;
+                }
+
+                navigationsPointer = oneToOneNode.GetLoadedNavigationsNoType(navigationsPointer);
+            }
+
+            if (isAllLevelOneToOneNavigationsFullyLoaded == true)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        public static List<IIncludedNavigationQueryChainNode> GetOrderedIIncludedNavigationQueryChainFromLastNode(IIncludedNavigationQueryChainNode node)
         {
             if (node == null)
             {
@@ -2155,17 +2817,25 @@ namespace EFCore3Library
                 pointer = pointer.PreviousNode;
             }
 
+            return chain;
+        }
+
+        public static string BuildIIncludedNavigationQueryChainNodeFKNameChain(IIncludedNavigationQueryChainNode node)
+        {
+            if (node == null)
+            {
+                return null;
+            }
+
             var stringBuilder = new StringBuilder();
 
-            foreach (var item in chain)
+            if (node.PreviousNode != null)
             {
-                if (stringBuilder.Length > 0)
-                {
-                    stringBuilder.Append(".");
-                }
-
-                stringBuilder.Append(item.FKName);
+                stringBuilder.Append(node.PreviousNode.FKNameChain);
+                stringBuilder.Append(".");
             }
+
+            stringBuilder.Append(node.FKName);
 
             return stringBuilder.ToString();
         }
@@ -2210,6 +2880,27 @@ namespace EFCore3Library
             var memberExpression = Expression.Property(parameter, properyName);
 
             var lambdaExpression = Expression.Lambda<Func<TSource, TProperty>>(memberExpression, parameter);
+
+            return lambdaExpression;
+        }
+
+        public static LambdaExpression GetPropertySelector<TSource>(string properyName, Type realProperyType, Type targetPropertyType = null)
+        {
+            Type delegateType = typeof(Func<,>).MakeGenericType(typeof(TSource), targetPropertyType ?? realProperyType);
+
+            var parameter = Expression.Parameter(typeof(TSource));
+            var memberExpression = Expression.Property(parameter, properyName);
+
+            if (targetPropertyType != null && targetPropertyType != realProperyType)
+            {
+                var memberExpressionConverted = Expression.Convert(memberExpression, targetPropertyType);
+
+                var lambdaExpressionConverted = Expression.Lambda(delegateType, memberExpressionConverted, parameter);
+
+                return lambdaExpressionConverted;
+            }
+
+            var lambdaExpression = Expression.Lambda(delegateType, memberExpression, parameter);
 
             return lambdaExpression;
         }
@@ -2276,6 +2967,18 @@ namespace EFCore3Library
             return Expression.Lambda(call, pe);
         }
 
+        public static LambdaExpression ConvertToEqualsExpr(LambdaExpression expression, object targetValue)
+        {
+            var left = expression;
+            ParameterExpression pe = left.Parameters.Single();
+
+            var realTargetType = expression.Body.Type;
+
+            Expression right = Expression.Constant(targetValue, realTargetType);
+
+            return Expression.Lambda(Expression.Equal(left.Body, right), pe);
+        }
+
         public static LambdaExpression ConvertToNotEqualsExpr(LambdaExpression expression, object targetValue)
         {
             var left = expression;
@@ -2299,11 +3002,21 @@ namespace EFCore3Library
             return Compose(first, second, Expression.And);
         }
 
+        public static T Construct<T>(Type[] paramTypes, object[] paramValues)
+        {
+            Type t = typeof(T);
+
+            ConstructorInfo ci = t.GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null, paramTypes, null);
+
+            return (T)ci.Invoke(paramValues);
+        }
+
         private static Expression<T> Compose<T>(Expression<T> first, Expression<T> second, Func<Expression, Expression, Expression> merge)
         {
             // build parameter map (from parameters of second to parameters of first)
             var map = first.Parameters.Select((f, i) => new { f, s = second.Parameters[i] }).ToDictionary(p => p.s, p => p.f);
-
 
             // replace parameters in the second lambda expression with parameters from the first
             var secondBody = ParameterRebinder.ReplaceParameters(map, second.Body);
@@ -2329,13 +3042,36 @@ namespace EFCore3Library
             return source.IsGenericType && source.GetGenericTypeDefinition() == typeof(Nullable<>);
         }
 
+        public static IQueryable<TNavigation> BuildJoinQuerySelectInner<TEntity, TNavigation>(IQueryable<TEntity> outerQuery,
+            IQueryable<TNavigation> interQuery,
+            LambdaExpression outerSelector,
+            LambdaExpression innerSelector,
+            Type selectorKeyType)
+        {
+            var joinMethod = typeof(Queryable).GetMethods().Single(
+                    method => method.Name == "Join"
+                            && method.IsGenericMethodDefinition
+                            && method.GetGenericArguments().Length == 4
+                            && method.GetParameters().Length == 5);
+
+            Expression<Func<TEntity, TNavigation, TNavigation>> resultSelector = (left, right) => right;
+
+            object result = joinMethod
+                    .MakeGenericMethod(typeof(TEntity), typeof(TNavigation), selectorKeyType, typeof(TNavigation))
+                    .Invoke(null, new object[] { outerQuery, interQuery, outerSelector, innerSelector, resultSelector });
+
+            var resultQuery = result as IQueryable<TNavigation>;
+
+            return resultQuery;
+        }
+
         public static Func<T, object> BuildUntypedGetter<T>(MemberInfo memberInfo)
         {
             var targetType = memberInfo.DeclaringType;
             var exInstance = Expression.Parameter(targetType, "t");
 
-            var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);       // t.PropertyName
-            var exConvertToObject = Expression.Convert(exMemberAccess, typeof(object));     // Convert(t.PropertyName, typeof(object))
+            var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);
+            var exConvertToObject = Expression.Convert(exMemberAccess, typeof(object)); 
             var lambda = Expression.Lambda<Func<T, object>>(exConvertToObject, exInstance);
 
             var action = lambda.Compile();
@@ -2349,7 +3085,6 @@ namespace EFCore3Library
 
             var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);
 
-            // t.PropertValue(Convert(p))
             var exValue = Expression.Parameter(typeof(object), "p");
             var exConvertedValue = Expression.Convert(exValue, GetUnderlyingType(memberInfo));
             var exBody = Expression.Assign(exMemberAccess, exConvertedValue);
@@ -2436,6 +3171,51 @@ namespace EFCore3Library
             {
                 return _lambdaHash(obj);
             }
+        }
+
+        internal class KeySelector<TEntity>
+        {
+            public LambdaExpression LambdaExpression { get; set; }
+
+            public Func<TEntity, object> UntypedGetter { get; set; }
+        }
+
+        internal class LoadedNavigationInfo
+        {
+            public Type LastEntityType { get; set; }
+            public Type LastNavigationType { get; set; }
+
+            public string FKName { get; set; }
+
+            public string FKNameChain { get; set; }
+
+            public int LastEntityOffsetFromFirstEntity { get; set; }
+
+            public IEnumerable<object> LoadedNavigations { get; set; } = new List<object>();
+
+            public IQueryable CurrentQuery { get; set; }
+        }
+
+        internal class IncludedNavigationQueryChainNodeInvokeQueryResult<TNavigation>
+            where TNavigation : class
+        {
+            public List<TNavigation> Navigations { get; set; } = new List<TNavigation>();
+
+            public List<ManualIncludeQueryHelper.LoadedNavigationInfo> LoadedNavigations { get; set; } = new List<ManualIncludeQueryHelper.LoadedNavigationInfo>();
+        }
+
+        internal class IncludedNavigationQueryChainNodeInvokeQueryResultNoType
+        {
+            public IEnumerable<object> Navigations { get; set; } = new List<object>();
+
+            public List<ManualIncludeQueryHelper.LoadedNavigationInfo> LoadedNavigations { get; set; } = new List<ManualIncludeQueryHelper.LoadedNavigationInfo>();
+        }
+
+        internal class BuildQueryWithAllOneToOneIncludesResult<TEntity>
+        {
+            public IQueryable<TEntity> EntityQueryaleWithOneToOneIncludes { get; set; }
+
+            public List<List<IIncludedNavigationQueryChainNode>> AllOneToOneAutoIncludes { get; set; } = new List<List<IIncludedNavigationQueryChainNode>>();
         }
     }
 }

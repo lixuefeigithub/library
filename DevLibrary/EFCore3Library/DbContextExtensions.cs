@@ -11,7 +11,7 @@ namespace EFCore3Library
     public static class DbContextExtensions
     {
         /// <summary>
-        /// Ex. _dbContext.LoadOneToManyEntities(building, x => x.Units)
+        /// 
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
         /// <typeparam name="TNavigation"></typeparam>
@@ -19,7 +19,7 @@ namespace EFCore3Library
         /// <param name="entity"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="isTracking"></param>
-        public static void LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
+        public static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, ICollection<TNavigation>>> navigationPropertyPath,
             bool isTracking = false)
@@ -28,7 +28,7 @@ namespace EFCore3Library
         {
             if (entity == null)
             {
-                return;
+                return new List<TNavigation>();
             }
 
             var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
@@ -96,10 +96,12 @@ namespace EFCore3Library
 
             navigationPropertyInfo.SetValue(entity, navigationEntities);
             navigationEntities.ForEach(x => inversePkNavigationPropertyInfo.SetValue(x, entity));
+
+            return navigationEntities;
         }
 
         /// <summary>
-        /// Ex. _dbContext.LoadOneToManyEntities(buildings, x => x.Units)
+        /// 
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
         /// <typeparam name="TNavigation"></typeparam>
@@ -107,7 +109,7 @@ namespace EFCore3Library
         /// <param name="entities"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="isTracking"></param>
-        public static void LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
+        public static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, ICollection<TNavigation>>> navigationPropertyPath,
             bool isTracking = false)
@@ -116,7 +118,7 @@ namespace EFCore3Library
         {
             if (entities == null || !entities.Any())
             {
-                return;
+                return new List<TNavigation>();
             }
 
             var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
@@ -205,10 +207,12 @@ namespace EFCore3Library
                     navigationEntitiesList.ForEach(x => inversePkNavigationPropertySetter(x, entity));
                 }
             }
+
+            return allNavigationEntities;
         }
 
         /// <summary>
-        /// Ex. _dbContext.LoadManyToOneEntities(unit, x => x.Building)
+        /// 
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
         /// <typeparam name="TNavigation"></typeparam>
@@ -216,7 +220,7 @@ namespace EFCore3Library
         /// <param name="entity"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="isTracking"></param>
-        public static void LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
+        public static TNavigation LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -225,7 +229,7 @@ namespace EFCore3Library
         {
             if (entity == null)
             {
-                return;
+                return null;
             }
 
             if (IsICollection(typeof(TNavigation)))
@@ -245,7 +249,6 @@ namespace EFCore3Library
 
             var navigationForeignKey = navigation.ForeignKey;
 
-            //Unit.BuildingId
             if (navigation.ForeignKey.Properties.Count != 1)
             {
                 throw new NotImplementedException("No FK or more than one FK column");
@@ -260,18 +263,9 @@ namespace EFCore3Library
             if (keyValueObj == null)
             {
                 //nullable FK
-                return;
+                return null;
             }
 
-            ////Building.Units
-            //var inverseCollectionProperty = navigationForeignKey.DependentToPrincipal;
-
-            //var inverseCollectionPropertyInfo = inverseCollectionProperty.PropertyInfo;
-
-            ////BuildingId
-            //var fkName = navigationForeignKeyProperty.Name;
-
-            //Building.BuildingId
             if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
             {
                 throw new NotImplementedException("No PK or more than one PK column");
@@ -284,7 +278,6 @@ namespace EFCore3Library
                 throw new NotImplementedException("method not support for many to many relationship");
             }
 
-            //BuildingId
             var pkName = pkProperty.Name;
 
             var filterPropertyExpression = GetPropertySelector<TNavigation>(pkName);
@@ -303,11 +296,12 @@ namespace EFCore3Library
             var navigationEntity = query.FirstOrDefault();
 
             navigationPropertyInfo.SetValue(entity, navigationEntity);
+
+            return navigationEntity;
         }
 
         /// <summary>
-        /// A one-to-many relationship with unique index 
-        /// Ex. _dbContext.LoadOneToManyEntities(documents, x => x.EversignDocumentBstkDocument)
+        /// 
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
         /// <typeparam name="TNavigation"></typeparam>
@@ -315,7 +309,122 @@ namespace EFCore3Library
         /// <param name="entities"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="isTracking"></param>
-        public static void LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
+        public static List<TNavigation> LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
+            IEnumerable<TEntity> entities,
+            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            bool isTracking = false,
+            bool isOneToOne = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entities == null || !entities.Any())
+            {
+                return new List<TNavigation>();
+            }
+
+            if (IsICollection(typeof(TNavigation)))
+            {
+                throw new ArgumentException(nameof(TNavigation));
+            }
+
+            var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
+
+            var navigationPropertyInfo = navigationPropertyPath.GetPropertyInfo();
+            var navigation = entityType.FindNavigation(navigationPropertyInfo.Name);
+
+            if (navigation == null)
+            {
+                throw new ArgumentException("Cannot find navigation property", nameof(navigationPropertyPath));
+            }
+
+            var navigationForeignKey = navigation.ForeignKey;
+
+            if (navigation.ForeignKey.Properties.Count != 1)
+            {
+                throw new NotImplementedException("No FK or more than one FK column");
+            }
+
+            var navigationForeignKeyProperty = navigation.ForeignKey.Properties.Single();
+
+            var navigationForeignKeyPropertyInfo = navigationForeignKeyProperty.PropertyInfo;
+
+            var isNullableFk = IsNullableType(navigationForeignKeyPropertyInfo.PropertyType);
+
+            var keyValueSelector = FastInvoke.BuildUntypedGetter<TEntity>(navigationForeignKeyPropertyInfo);
+            var keyValuesQuery = entities.Select(keyValueSelector);
+
+            if (isNullableFk)
+            {
+                keyValuesQuery = keyValuesQuery.Where(x => x != null);
+            }
+
+            if (!isOneToOne)
+            {
+                keyValuesQuery = keyValuesQuery.Distinct();
+            }
+
+            var keyValues = keyValuesQuery.ToList();
+
+            if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
+            {
+                throw new NotImplementedException("No PK or more than one PK column");
+            }
+
+            var pkProperty = navigationForeignKey.PrincipalKey.Properties.Single();
+
+            if (pkProperty.DeclaringEntityType.Name != typeof(TNavigation).FullName)
+            {
+                throw new NotImplementedException("method not support for many to many relationship");
+            }
+
+            var pkName = pkProperty.Name;
+
+            var filterPropertyExpression = GetPropertySelector<TNavigation>(pkName);
+            var filterExpression = filterPropertyExpression.ConvertToContainsExpr(keyValues);
+
+            var query = dbContext.Set<TNavigation>()
+                .AsQueryable();
+
+            if (!isTracking)
+            {
+                query = query.AsNoTracking();
+            }
+
+            query = Queryable.Where(query, (dynamic)filterExpression);
+
+            var navigationEntities = query.ToList();
+
+            var pkValueSelector = GetPropertySelector<TNavigation, int>(pkName).Compile();
+            var navigationPropertySetter = FastInvoke.BuildUntypedSetter<TEntity>(navigationPropertyInfo);
+
+            var fkSelector = FastInvoke.BuildUntypedGetter<TEntity>(navigationForeignKeyPropertyInfo);
+
+            foreach (var entity in entities)
+            {
+                var keyValueObj = fkSelector(entity);
+
+                if (keyValueObj == null)
+                {
+                    continue;
+                }
+
+                var navigationEntity = navigationEntities.FirstOrDefault(x => object.Equals(pkValueSelector(x), keyValueObj));
+                navigationPropertySetter(entity, navigationEntity);
+            }
+
+            return navigationEntities;
+        }
+
+        /// <summary>
+        /// A one-to-many relationship with unique index 
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entities"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
+        public static TNavigation LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -324,7 +433,7 @@ namespace EFCore3Library
         {
             if (entity == null)
             {
-                return;
+                return null;
             }
 
             if (IsICollection(typeof(TNavigation)))
@@ -408,11 +517,12 @@ namespace EFCore3Library
 
                 inversePkNavigationPropertySetter(navigationEntity, entity);
             }
+
+            return navigationEntity;
         }
 
         /// <summary>
         /// A one-to-many relationship with unique index 
-        /// Ex. _dbContext.LoadOneToManyEntities(documents, x => x.EversignDocumentBstkDocument)
         /// </summary>
         /// <typeparam name="TEntity"></typeparam>
         /// <typeparam name="TNavigation"></typeparam>
@@ -420,7 +530,7 @@ namespace EFCore3Library
         /// <param name="entities"></param>
         /// <param name="navigationPropertyPath"></param>
         /// <param name="isTracking"></param>
-        public static void LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
+        public static List<TNavigation> LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -429,7 +539,7 @@ namespace EFCore3Library
         {
             if (entities == null || !entities.Any())
             {
-                return;
+                return new List<TNavigation>();
             }
 
             var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
@@ -523,143 +633,9 @@ namespace EFCore3Library
 
                 inversePkNavigationPropertySetter(navigationEntity, entity);
             }
+
+            return allNavigationEntities;
         }
-
-        /// <summary>
-        /// Ex. _dbContext.LoadManyToOneEntities(units, x => x.Building)
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entities"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static void LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
-            IEnumerable<TEntity> entities,
-            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
-            bool isTracking = false)
-            where TEntity : class
-            where TNavigation : class
-        {
-            if (entities == null || !entities.Any())
-            {
-                return;
-            }
-
-            if (IsICollection(typeof(TNavigation)))
-            {
-                throw new ArgumentException(nameof(TNavigation));
-            }
-
-            var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
-
-            var navigationPropertyInfo = navigationPropertyPath.GetPropertyInfo();
-            var navigation = entityType.FindNavigation(navigationPropertyInfo.Name);
-
-            if (navigation == null)
-            {
-                throw new ArgumentException("Cannot find navigation property", nameof(navigationPropertyPath));
-            }
-
-            var navigationForeignKey = navigation.ForeignKey;
-
-            //Unit.BuildingId
-            if (navigation.ForeignKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("No FK or more than one FK column");
-            }
-
-            var navigationForeignKeyProperty = navigation.ForeignKey.Properties.Single();
-
-            var navigationForeignKeyPropertyInfo = navigationForeignKeyProperty.PropertyInfo;
-
-            var isNullableFk = IsNullableType(navigationForeignKeyPropertyInfo.PropertyType);
-
-            var keyValueSelector = FastInvoke.BuildUntypedGetter<TEntity>(navigationForeignKeyPropertyInfo);
-            var keyValuesQuery = entities.Select(keyValueSelector);
-
-            if (isNullableFk)
-            {
-                keyValuesQuery = keyValuesQuery.Where(x => x != null);
-            }
-
-            var keyValues = keyValuesQuery.Distinct().ToList();
-
-            ////Building.Units
-            //var inverseCollectionProperty = navigationForeignKey.DependentToPrincipal;
-
-            //var inverseCollectionPropertyInfo = inverseCollectionProperty.PropertyInfo;
-
-            ////BuildingId
-            //var fkName = navigationForeignKeyProperty.Name;
-
-            //Building.BuildingId
-            if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("No PK or more than one PK column");
-            }
-
-            var pkProperty = navigationForeignKey.PrincipalKey.Properties.Single();
-
-            if (pkProperty.DeclaringEntityType.Name != typeof(TNavigation).FullName)
-            {
-                throw new NotImplementedException("method not support for many to many relationship");
-            }
-
-            //BuildingId
-            var pkName = pkProperty.Name;
-
-            var filterPropertyExpression = GetPropertySelector<TNavigation>(pkName);
-            var filterExpression = filterPropertyExpression.ConvertToContainsExpr(keyValues);
-
-            var query = dbContext.Set<TNavigation>()
-                .AsQueryable();
-
-            if (!isTracking)
-            {
-                query = query.AsNoTracking();
-            }
-
-            query = Queryable.Where(query, (dynamic)filterExpression);
-
-            var navigationEntities = query.ToList();
-
-            var pkValueSelector = GetPropertySelector<TNavigation, int>(pkName).Compile();
-            var navigationPropertySetter = FastInvoke.BuildUntypedSetter<TEntity>(navigationPropertyInfo);
-
-            var fkSelector = FastInvoke.BuildUntypedGetter<TEntity>(navigationForeignKeyPropertyInfo);
-
-            foreach (var entity in entities)
-            {
-                var keyValueObj = fkSelector(entity);
-
-                if (keyValueObj == null)
-                {
-                    continue;
-                }
-
-                var navigationEntity = navigationEntities.FirstOrDefault(x => object.Equals(pkValueSelector(x), keyValueObj));
-                navigationPropertySetter(entity, navigationEntity);
-            }
-        }
-
-        //public static int GetSingleIntegerKeyValue<T>(this DbContext dbContext, T entity)
-        //{
-        //    var keyName = dbContext.Model.FindEntityType(typeof(T)).FindPrimaryKey().Properties
-        //        .Select(x => x.Name)
-        //        .Single();
-
-        //    return (int)entity.GetType().GetProperty(keyName).GetValue(entity, null);
-        //}
-
-        //public static Expression<Func<T, int>> GetSingleIntegerKeySelector<T>(this DbContext dbContext)
-        //{
-        //    var keyName = dbContext.Model.FindEntityType(typeof(T)).FindPrimaryKey().Properties
-        //        .Select(x => x.Name)
-        //        .Single();
-
-        //    return GetPropertySelector<T, int>(keyName);
-        //}
 
         private static PropertyInfo GetPropertyInfo<TSource, TProperty>(this Expression<Func<TSource, TProperty>> propertyLambda)
         {
@@ -720,7 +696,9 @@ namespace EFCore3Library
             var left = expression;
             ParameterExpression pe = left.Parameters.Single();
 
-            Expression right = Expression.Constant(targetValue);
+            var realTargetType = expression.Body.Type;
+
+            Expression right = Expression.Constant(targetValue, realTargetType);
 
             return Expression.Lambda(Expression.Equal(left.Body, right), pe);
         }
@@ -801,8 +779,8 @@ namespace EFCore3Library
                 var targetType = memberInfo.DeclaringType;
                 var exInstance = Expression.Parameter(targetType, "t");
 
-                var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);       // t.PropertyName
-                var exConvertToObject = Expression.Convert(exMemberAccess, typeof(object));     // Convert(t.PropertyName, typeof(object))
+                var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);
+                var exConvertToObject = Expression.Convert(exMemberAccess, typeof(object));
                 var lambda = Expression.Lambda<Func<T, object>>(exConvertToObject, exInstance);
 
                 var action = lambda.Compile();
@@ -816,7 +794,6 @@ namespace EFCore3Library
 
                 var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);
 
-                // t.PropertValue(Convert(p))
                 var exValue = Expression.Parameter(typeof(object), "p");
                 var exConvertedValue = Expression.Convert(exValue, GetUnderlyingType(memberInfo));
                 var exBody = Expression.Assign(exMemberAccess, exConvertedValue);
