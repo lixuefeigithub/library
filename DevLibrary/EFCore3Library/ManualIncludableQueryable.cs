@@ -325,6 +325,8 @@ namespace EFCore3Library
 
             var loadedNavigationsFilteredForThisInclude = new List<TLastNavigation>();
 
+            var isAllNavigationsAlreadyLoaded = false;
+
             if (hasLoadedNavigations)
             {
                 var loadedFKKeysEnumerable = loadedNavigations.Select(x => _fkSelector(x));
@@ -347,6 +349,8 @@ namespace EFCore3Library
                 var allFKKeys = entities.Select(_pkSelector).ToList();
 
                 var notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
+
+                isAllNavigationsAlreadyLoaded = notLoadedFKKeys.Count == 0;
 
                 var loadedFKKeysForCurrentInclude = allFKKeys.Except(notLoadedFKKeys).ToList();
 
@@ -376,7 +380,8 @@ namespace EFCore3Library
                 query,
                 navigationQuery,
                 isCombineOneToOneQueryUsingEFInclude,
-                loadedNavigationsFilteredForThisInclude);
+                loadedNavigationsFilteredForThisInclude,
+                isAllNavigationsAlreadyLoaded: isAllNavigationsAlreadyLoaded);
 
             result.Navigations = invokeQueryCoreResult.Navigations;
             result.LoadedNavigations = invokeQueryCoreResult.LoadedNavigations;
@@ -744,6 +749,8 @@ namespace EFCore3Library
 
             var loadedNavigationsFilteredForThisInclude = new List<TLastNavigation>();
 
+            var isAllNavigationsAlreadyLoaded = false;
+
             if (hasLoadedNavigations)
             {
                 var loadedFKKeysQuery = loadedNavigations.Select(x => _fkSelector(x));
@@ -769,6 +776,8 @@ namespace EFCore3Library
 
                 var notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
 
+                isAllNavigationsAlreadyLoaded = notLoadedFKKeys.Count == 0;
+
                 var navigationFkSelector = ManualIncludeQueryHelper.GetPropertySelector<TLastNavigation>(_fkName);
                 var filterExpression = ManualIncludeQueryHelper.ConvertToContainsExpr(navigationFkSelector, notLoadedFKKeys);
 
@@ -789,7 +798,8 @@ namespace EFCore3Library
                 query,
                 navigationQuery,
                 isCombineOneToOneQueryUsingEFInclude,
-                loadedNavigationsFilteredForThisInclude);
+                loadedNavigationsFilteredForThisInclude,
+                isAllNavigationsAlreadyLoaded: isAllNavigationsAlreadyLoaded);
 
             result.Navigations = invokeQueryCoreResult.Navigations;
             result.LoadedNavigations = invokeQueryCoreResult.LoadedNavigations;
@@ -1171,6 +1181,8 @@ namespace EFCore3Library
             //If has too many loaded navigations the query performance is bad, so if has loaded navigation we force re-write query
             var isNeedToOverwriteQuery = hasLoadedNavigations || _isInvokeDistinctInMemory;
 
+            var isAllNavigationsAlreadyLoaded = false;
+
             if (isNeedToOverwriteQuery)
             {
                 var loadedKeys = new List<object>();
@@ -1220,6 +1232,8 @@ namespace EFCore3Library
                         .ToList();
 
                     keyValues = keyValues.Except(loadedKeys).ToList();
+
+                    isAllNavigationsAlreadyLoaded = keyValues.Count == 0;
                 }
 
                 var filterExpression = ManualIncludeQueryHelper.ConvertToContainsExpr(navigationPkSelector, keyValues);
@@ -1241,7 +1255,8 @@ namespace EFCore3Library
                 query,
                 navigationQuery,
                 isCombineOneToOneQueryUsingEFInclude,
-                loadedNavigationsFilteredForThisInclude);
+                loadedNavigationsFilteredForThisInclude,
+                isAllNavigationsAlreadyLoaded: isAllNavigationsAlreadyLoaded);
 
             result.Navigations = invokeQueryCoreResult.Navigations;
             result.LoadedNavigations = invokeQueryCoreResult.LoadedNavigations;
@@ -2622,7 +2637,8 @@ namespace EFCore3Library
             IQueryable<T> filteredNavigationQuery,
             IQueryable<T> originalNavigationQuery,
             bool isCombineOneToOneQueryUsingEFInclude,
-            IEnumerable<T> loadedNavigationsFilteredForThisInclude)
+            IEnumerable<T> loadedNavigationsFilteredForThisInclude,
+            bool isAllNavigationsAlreadyLoaded)
             where T : class
         {
             if (filteredNavigationQuery == null)
@@ -2684,9 +2700,12 @@ namespace EFCore3Library
                 includeQuery = includeQuery.Include(navigationPath);
             }
 
-            var navigations = includeQuery.ToList();
+            if (!isAllNavigationsAlreadyLoaded)
+            {
+                var navigations = includeQuery.ToList();
 
-            result.Navigations.AddRange(navigations);
+                result.Navigations.AddRange(navigations);
+            }
 
             result.LoadedNavigations.Add(new LoadedNavigationInfo
             {
@@ -3071,7 +3090,7 @@ namespace EFCore3Library
             var exInstance = Expression.Parameter(targetType, "t");
 
             var exMemberAccess = Expression.MakeMemberAccess(exInstance, memberInfo);
-            var exConvertToObject = Expression.Convert(exMemberAccess, typeof(object)); 
+            var exConvertToObject = Expression.Convert(exMemberAccess, typeof(object));
             var lambda = Expression.Lambda<Func<T, object>>(exConvertToObject, exInstance);
 
             var action = lambda.Compile();
