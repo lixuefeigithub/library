@@ -1,141 +1,58 @@
-﻿using EFCore3Library;
-using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq.Expressions;
-
-namespace System.Linq
+﻿namespace System.Linq
 {
-    public static class ManualIncludableQueryableExtensions
+    using EFCoreLibrary;
+    using Microsoft.EntityFrameworkCore;
+    using System;
+    using System.Collections.Generic;
+    using System.Linq.Expressions;
+
+    public static partial class ManualIncludableQueryableExtensions
     {
-        /// <summary>
-        /// Include one-to-many navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNavigation> IncludeManyManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
-            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
+        public static IManualIncludableQueryable<TEntity> AsManualIncludableQueryable<TEntity>(this IQueryable<TEntity> source,
             DbContext dbContext)
+            where TEntity : class
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var query = EntityFrameworkManualIncludableQueryable<TEntity, TEntity>.CreateEmptyManualIncludableQueryable(source, dbContext);
+
+            return query;
+        }
+
+        public static IManualIncludableQueryable<TEntity> AsManualIncludableQueryable<TEntity, TNavigation>(this IManualIncludableQueryable<TEntity, TNavigation> source)
             where TEntity : class
             where TNavigation : class
         {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = ManualIncludableQueryable<TEntity, TNavigation>.CreateFirstOneToManyIncludeChainQuery(source,
-                navigationPropertyPath,
-                dbContext);
-
-            return includableQuery;
+            return source;
         }
 
-        /// <summary>
-        /// Include one-to-many navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TLastNavigation"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyManually<TEntity, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
+        public static IOrderedManualIncludableQueryable<TEntity> AsOrderedManualIncludableQueryable<TEntity>(this IOrderedQueryable<TEntity> source,
+            DbContext dbContext)
             where TEntity : class
-            where TLastNavigation : class
-            where TNewNavigation : class
         {
             if (source == null)
             {
                 return null;
             }
 
-            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
+            var query = EntityFrameworkOrderedManualIncludableQueryable<TEntity, TEntity>.CreateEmptyOrderedManualIncludableQueryable(source, dbContext);
 
-            return includableQuery;
+            return query;
         }
 
-        /// <summary>
-        /// Include one-to-many navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyManually<TEntity, TNewNavigation>(
-            this IManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
+        public static IOrderedManualIncludableQueryable<TEntity> AsOrderedManualIncludableQueryable<TEntity, TNavigation>(this IOrderedManualIncludableQueryable<TEntity, TNavigation> source)
             where TEntity : class
-            where TNewNavigation : class
+            where TNavigation : class
         {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
-
-            return includableQuery;
+            return source;
         }
 
-        public static IManualIncludableQueryable<TEntity> AsIManualIncludableQueryable<TEntity, TLastNavigation>(this ManualIncludableQueryable<TEntity, TLastNavigation> source)
-            where TEntity : class
-            where TLastNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
+        #region include
 
-            return (IManualIncludableQueryable<TEntity>)source;
-        }
-
-        /// <summary>
-        /// Include one-to-many navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyManually<TEntity, TNewNavigation>(
-            this IOrderedManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
-            where TEntity : class
-            where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewOneToManyIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include many-to-one or one-to-one navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNavigation> IncludeOneManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
+        public static IManualIncludableQueryable<TEntity, TNavigation> IncludeManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isOneToOne = false,
@@ -148,7 +65,7 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = ManualIncludableQueryable<TEntity, TNavigation>.CreateFirstManyToOneIncludeChainQuery(source,
+            var includableQuery = EntityFrameworkManualIncludableQueryable<TEntity, TNavigation>.CreateFirstIncludeChainQuery(source,
                 navigationPropertyPath,
                 dbContext,
                 isOneToOne: isOneToOne,
@@ -157,51 +74,7 @@ namespace System.Linq
             return includableQuery;
         }
 
-        /// <summary>
-        /// Include many-to-one or one-to-one navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TLastNavigation"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeOneManually<TEntity, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
-            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
-            where TEntity : class
-            where TLastNavigation : class
-            where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
-                isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include many-to-one or one-to-one navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeOneManually<TEntity, TNewNavigation>(
+        public static IManualIncludableQueryable<TEntity, TNewNavigation> IncludeManually<TEntity, TNewNavigation>(
             this IManualIncludableQueryable<TEntity> source,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
@@ -214,189 +87,15 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
+            var includableQuery = source.CreateNewIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
             return includableQuery;
         }
 
-        /// <summary>
-        /// Include many-to-one or one-to-one navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeOneManually<TEntity, TNewNavigation>(
-            this IOrderedManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
-            bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
-            where TEntity : class
-            where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewManyToOneIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
-                isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include one-to-many navigations with a unique key
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNavigation> IncludeManyUniqueManually<TEntity, TNavigation>(this IQueryable<TEntity> source,
-           Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
-           DbContext dbContext)
-           where TEntity : class
-           where TNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = ManualIncludableQueryable<TEntity, TNavigation>.CreateFirstOneToManyUniqueIncludeChainQuery(source,
-                navigationPropertyPath,
-                dbContext);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include one-to-many navigations with a unique key
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TLastNavigation"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
-            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
-            where TEntity : class
-            where TLastNavigation : class
-            where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include one-to-many navigations with a unique key
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TNewNavigation>(
-            this IManualIncludableQueryable<TEntity> source,
-            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
-            where TEntity : class
-            where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include one-to-many navigations with a unique key
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> IncludeManyUniqueManually<TEntity, TNewNavigation>(
-           this IOrderedManualIncludableQueryable<TEntity> source,
-           Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath)
-           where TEntity : class
-           where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(navigationPropertyPath);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include one-to-many navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TLastNavigation"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManyManually<TEntity, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
-            Expression<Func<TLastNavigation, IEnumerable<TNewNavigation>>> navigationPropertyPath)
-            where TEntity : class
-            where TLastNavigation : class
-            where TNewNavigation : class
-        {
-            if (source == null)
-            {
-                return null;
-            }
-
-            var includableQuery = source.CreateOneToManyThenIncludeQuery<TNewNavigation>(navigationPropertyPath);
-
-            return includableQuery;
-        }
-
-        /// <summary>
-        /// Include many-to-one or one-to-one navigations
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TLastNavigation"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeOneManually<TEntity, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
+        public static IManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManually<TEntity, TLastNavigation, TNewNavigation>(
+            this IManualIncludableQueryable<TEntity, TLastNavigation> source,
             Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
             bool isInvokeDistinctInMemory = false)
@@ -409,26 +108,18 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateManyToOneThenIncludeQuery<TNewNavigation>(navigationPropertyPath,
+            var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
             return includableQuery;
         }
 
-        /// <summary>
-        /// Include one-to-many navigations with a unique key
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TLastNavigation"></typeparam>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="source"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="dbContext"></param>
-        /// <returns></returns>
-        public static ManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManyUniqueManually<TEntity, TLastNavigation, TNewNavigation>(
-            this ManualIncludableQueryable<TEntity, TLastNavigation> source,
-            Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath)
+        public static IManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManually<TEntity, TLastNavigation, TNewNavigation>(
+            this IManualIncludableQueryable<TEntity, IEnumerable<TLastNavigation>> source,
+            Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
+            bool isOneToOne = false,
+            bool isInvokeDistinctInMemory = false)
             where TEntity : class
             where TLastNavigation : class
             where TNewNavigation : class
@@ -438,24 +129,102 @@ namespace System.Linq
                 return null;
             }
 
-            var includableQuery = source.CreateOneToManyUniqueThenIncludeQuery<TNewNavigation>(navigationPropertyPath);
+            var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
+                isOneToOne: isOneToOne,
+                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
             return includableQuery;
         }
 
-        public static IManualIncludableQueryable<TEntity> CreateEmptyManualIncludableQuery<TEntity>(this IQueryable<TEntity> source,
-            DbContext dbContext)
+        #region Ordered Queryable
+
+        public static IOrderedManualIncludableQueryable<TEntity, TNavigation> IncludeManually<TEntity, TNavigation>(this IOrderedQueryable<TEntity> source,
+            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            DbContext dbContext,
+            bool isOneToOne = false,
+            bool isInvokeDistinctInMemory = false)
             where TEntity : class
+            where TNavigation : class
         {
             if (source == null)
             {
                 return null;
             }
 
-            var query = ManualIncludableQueryable<TEntity, TEntity>.CreateEmptyManualIncludableQueryable(source, dbContext);
+            var includableQuery = EntityFrameworkOrderedManualIncludableQueryable<TEntity, TNavigation>.CreateFirstIncludeChainQuery(source,
+                navigationPropertyPath,
+                dbContext,
+                isOneToOne: isOneToOne,
+                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
-            return query;
+            return includableQuery;
         }
+
+        public static IOrderedManualIncludableQueryable<TEntity, TNewNavigation> IncludeManually<TEntity, TNewNavigation>(
+            this IOrderedManualIncludableQueryable<TEntity> source,
+            Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
+            bool isOneToOne = false,
+            bool isInvokeDistinctInMemory = false)
+            where TEntity : class
+            where TNewNavigation : class
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var includableQuery = source.CreateNewIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
+                isOneToOne: isOneToOne,
+                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+
+            return includableQuery;
+        }
+
+        public static IOrderedManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManually<TEntity, TLastNavigation, TNewNavigation>(
+            this IOrderedManualIncludableQueryable<TEntity, TLastNavigation> source,
+            Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
+            bool isOneToOne = false,
+            bool isInvokeDistinctInMemory = false)
+            where TEntity : class
+            where TLastNavigation : class
+            where TNewNavigation : class
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
+                isOneToOne: isOneToOne,
+                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+
+            return includableQuery;
+        }
+
+        public static IOrderedManualIncludableQueryable<TEntity, TNewNavigation> ThenIncludeManually<TEntity, TLastNavigation, TNewNavigation>(
+            this IOrderedManualIncludableQueryable<TEntity, IEnumerable<TLastNavigation>> source,
+            Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
+            bool isOneToOne = false,
+            bool isInvokeDistinctInMemory = false)
+            where TEntity : class
+            where TLastNavigation : class
+            where TNewNavigation : class
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
+                isOneToOne: isOneToOne,
+                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+
+            return includableQuery;
+        }
+
+        #endregion
+
+        #endregion
 
         public static List<TEntity> ToList<TEntity>(this IManualIncludableQueryable<TEntity> source)
             where TEntity : class
@@ -465,7 +234,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entities = source.InvokeQueryToList();
+            var entities = ManualIncludableQueryableHelper.InvokeQueryToList(source);
 
             return entities;
         }
@@ -478,7 +247,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entities = source.InvokeQueryToArray();
+            var entities = ManualIncludableQueryableHelper.InvokeQueryToArray(source);
 
             return entities;
         }
@@ -491,7 +260,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryFirstOrDefault();
+            var entity = ManualIncludableQueryableHelper.InvokeQueryFirstOrDefault(source);
 
             return entity;
         }
@@ -505,7 +274,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryFirstOrDefault(predicate);
+            var entity = ManualIncludableQueryableHelper.InvokeQueryFirstOrDefault(source, predicate);
 
             return entity;
         }
@@ -518,7 +287,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryFirst();
+            var entity = ManualIncludableQueryableHelper.InvokeQueryFirst(source);
 
             return entity;
         }
@@ -532,7 +301,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryFirst(predicate);
+            var entity = ManualIncludableQueryableHelper.InvokeQueryFirst(source, predicate);
 
             return entity;
         }
@@ -545,7 +314,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryLastOrDefault();
+            var entity = ManualIncludableQueryableHelper.InvokeQueryLastOrDefault(source);
 
             return entity;
         }
@@ -559,7 +328,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryLastOrDefault(predicate);
+            var entity = ManualIncludableQueryableHelper.InvokeQueryLastOrDefault(source, predicate);
 
             return entity;
         }
@@ -572,7 +341,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryLast();
+            var entity = ManualIncludableQueryableHelper.InvokeQueryLast(source);
 
             return entity;
         }
@@ -586,7 +355,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQueryLast(predicate);
+            var entity = ManualIncludableQueryableHelper.InvokeQueryLast(source, predicate);
 
             return entity;
         }
@@ -599,7 +368,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQuerySingleOrDefault();
+            var entity = ManualIncludableQueryableHelper.InvokeQuerySingleOrDefault(source);
 
             return entity;
         }
@@ -613,7 +382,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQuerySingleOrDefault(predicate);
+            var entity = ManualIncludableQueryableHelper.InvokeQuerySingleOrDefault(source, predicate);
 
             return entity;
         }
@@ -626,7 +395,7 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQuerySingle();
+            var entity = ManualIncludableQueryableHelper.InvokeQuerySingle(source);
 
             return entity;
         }
@@ -640,12 +409,13 @@ namespace System.Linq
                 throw new ArgumentNullException(nameof(source));
             }
 
-            var entity = source.InvokeQuerySingle(predicate);
+            var entity = ManualIncludableQueryableHelper.InvokeQuerySingle(source, predicate);
 
             return entity;
         }
 
-        public static TAccumulate Aggregate<TSource, TAccumulate>(this IManualIncludableQueryable<TSource> source, TAccumulate seed, Expression<Func<TAccumulate, TSource, TAccumulate>> func)
+        public static TAccumulate Aggregate<TSource, TAccumulate>(this IManualIncludableQueryable<TSource> source,
+            TAccumulate seed, Expression<Func<TAccumulate, TSource, TAccumulate>> func)
             where TSource : class
         {
             if (source == null)
@@ -656,7 +426,10 @@ namespace System.Linq
             return source.GetQueryable().Aggregate(seed, func);
         }
 
-        public static TResult Aggregate<TSource, TAccumulate, TResult>(this IManualIncludableQueryable<TSource> source, TAccumulate seed, Expression<Func<TAccumulate, TSource, TAccumulate>> func, Expression<Func<TAccumulate, TResult>> selector)
+        public static TResult Aggregate<TSource, TAccumulate, TResult>(this IManualIncludableQueryable<TSource> source,
+            TAccumulate seed,
+            Expression<Func<TAccumulate, TSource, TAccumulate>> func,
+            Expression<Func<TAccumulate, TResult>> selector)
             where TSource : class
         {
             if (source == null)
@@ -924,7 +697,9 @@ namespace System.Linq
             return source1.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> Except<TSource>(this IManualIncludableQueryable<TSource> source1, IEnumerable<TSource> source2, IEqualityComparer<TSource> comparer)
+        public static IManualIncludableQueryable<TSource> Except<TSource>(this IManualIncludableQueryable<TSource> source1,
+            IEnumerable<TSource> source2,
+            IEqualityComparer<TSource> comparer)
             where TSource : class
         {
             if (source1 == null)
@@ -938,7 +713,8 @@ namespace System.Linq
             return source1.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IQueryable<IGrouping<TKey, TSource>> GroupBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector)
+        public static IQueryable<IGrouping<TKey, TSource>> GroupBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector)
             where TSource : class
         {
             if (source == null)
@@ -949,7 +725,9 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector);
         }
 
-        public static IQueryable<IGrouping<TKey, TSource>> GroupBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, IEqualityComparer<TKey> comparer)
+        public static IQueryable<IGrouping<TKey, TSource>> GroupBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            IEqualityComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -960,7 +738,9 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, comparer);
         }
 
-        public static IQueryable<IGrouping<TKey, TElement>> GroupBy<TSource, TKey, TElement>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, Expression<Func<TSource, TElement>> elementSelector)
+        public static IQueryable<IGrouping<TKey, TElement>> GroupBy<TSource, TKey, TElement>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            Expression<Func<TSource, TElement>> elementSelector)
             where TSource : class
         {
             if (source == null)
@@ -971,7 +751,10 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, elementSelector);
         }
 
-        public static IQueryable<IGrouping<TKey, TElement>> GroupBy<TSource, TKey, TElement>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, Expression<Func<TSource, TElement>> elementSelector, IEqualityComparer<TKey> comparer)
+        public static IQueryable<IGrouping<TKey, TElement>> GroupBy<TSource, TKey, TElement>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            Expression<Func<TSource, TElement>> elementSelector,
+            IEqualityComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -982,7 +765,9 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, elementSelector, comparer);
         }
 
-        public static IQueryable<TResult> GroupBy<TSource, TKey, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, Expression<Func<TKey, IEnumerable<TSource>, TResult>> resultSelector)
+        public static IQueryable<TResult> GroupBy<TSource, TKey, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            Expression<Func<TKey, IEnumerable<TSource>, TResult>> resultSelector)
             where TSource : class
         {
             if (source == null)
@@ -993,7 +778,10 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, resultSelector);
         }
 
-        public static IQueryable<TResult> GroupBy<TSource, TKey, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, Expression<Func<TKey, IEnumerable<TSource>, TResult>> resultSelector, IEqualityComparer<TKey> comparer)
+        public static IQueryable<TResult> GroupBy<TSource, TKey, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            Expression<Func<TKey, IEnumerable<TSource>, TResult>> resultSelector,
+            IEqualityComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -1004,7 +792,10 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, resultSelector, comparer);
         }
 
-        public static IQueryable<TResult> GroupBy<TSource, TKey, TElement, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, Expression<Func<TSource, TElement>> elementSelector, Expression<Func<TKey, IEnumerable<TElement>, TResult>> resultSelector)
+        public static IQueryable<TResult> GroupBy<TSource, TKey, TElement, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            Expression<Func<TSource, TElement>> elementSelector,
+            Expression<Func<TKey, IEnumerable<TElement>, TResult>> resultSelector)
             where TSource : class
         {
             if (source == null)
@@ -1015,7 +806,11 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, elementSelector, resultSelector);
         }
 
-        public static IQueryable<TResult> GroupBy<TSource, TKey, TElement, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, Expression<Func<TSource, TElement>> elementSelector, Expression<Func<TKey, IEnumerable<TElement>, TResult>> resultSelector, IEqualityComparer<TKey> comparer)
+        public static IQueryable<TResult> GroupBy<TSource, TKey, TElement, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            Expression<Func<TSource, TElement>> elementSelector,
+            Expression<Func<TKey, IEnumerable<TElement>, TResult>> resultSelector,
+            IEqualityComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -1026,7 +821,10 @@ namespace System.Linq
             return source.GetQueryable().GroupBy(keySelector, elementSelector, resultSelector, comparer);
         }
 
-        public static IQueryable<TResult> GroupJoin<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer, IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector, Expression<Func<TInner, TKey>> innerKeySelector, Expression<Func<TOuter, IEnumerable<TInner>, TResult>> resultSelector)
+        public static IQueryable<TResult> GroupJoin<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer,
+            IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector,
+            Expression<Func<TInner, TKey>> innerKeySelector,
+            Expression<Func<TOuter, IEnumerable<TInner>, TResult>> resultSelector)
             where TOuter : class
         {
             if (outer == null)
@@ -1037,7 +835,11 @@ namespace System.Linq
             return outer.GetQueryable().GroupJoin(inner, outerKeySelector, innerKeySelector, resultSelector);
         }
 
-        public static IQueryable<TResult> GroupJoin<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer, IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector, Expression<Func<TInner, TKey>> innerKeySelector, Expression<Func<TOuter, IEnumerable<TInner>, TResult>> resultSelector, IEqualityComparer<TKey> comparer)
+        public static IQueryable<TResult> GroupJoin<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer,
+            IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector,
+            Expression<Func<TInner, TKey>> innerKeySelector,
+            Expression<Func<TOuter, IEnumerable<TInner>, TResult>> resultSelector,
+            IEqualityComparer<TKey> comparer)
             where TOuter : class
         {
             if (outer == null)
@@ -1059,7 +861,9 @@ namespace System.Linq
             return source1.GetQueryable().Intersect(source2);
         }
 
-        public static IQueryable<TSource> Intersect<TSource>(this IManualIncludableQueryable<TSource> source1, IEnumerable<TSource> source2, IEqualityComparer<TSource> comparer)
+        public static IQueryable<TSource> Intersect<TSource>(this IManualIncludableQueryable<TSource> source1,
+            IEnumerable<TSource> source2,
+            IEqualityComparer<TSource> comparer)
             where TSource : class
         {
             if (source1 == null)
@@ -1070,7 +874,10 @@ namespace System.Linq
             return source1.GetQueryable().Intersect(source2, comparer);
         }
 
-        public static IQueryable<TResult> Join<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer, IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector, Expression<Func<TInner, TKey>> innerKeySelector, Expression<Func<TOuter, TInner, TResult>> resultSelector)
+        public static IQueryable<TResult> Join<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer,
+            IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector,
+            Expression<Func<TInner, TKey>> innerKeySelector,
+            Expression<Func<TOuter, TInner, TResult>> resultSelector)
             where TOuter : class
         {
             if (outer == null)
@@ -1081,7 +888,10 @@ namespace System.Linq
             return outer.GetQueryable().Join(inner, outerKeySelector, innerKeySelector, resultSelector);
         }
 
-        public static IQueryable<TResult> Join<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer, IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector, Expression<Func<TInner, TKey>> innerKeySelector, Expression<Func<TOuter, TInner, TResult>> resultSelector, IEqualityComparer<TKey> comparer)
+        public static IQueryable<TResult> Join<TOuter, TInner, TKey, TResult>(this IManualIncludableQueryable<TOuter> outer,
+            IEnumerable<TInner> inner, Expression<Func<TOuter, TKey>> outerKeySelector,
+            Expression<Func<TInner, TKey>> innerKeySelector, Expression<Func<TOuter, TInner, TResult>> resultSelector,
+            IEqualityComparer<TKey> comparer)
             where TOuter : class
         {
             if (outer == null)
@@ -1169,7 +979,8 @@ namespace System.Linq
             return source.GetQueryable().OfType<TResult>();
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> OrderBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector)
+        public static IOrderedManualIncludableQueryable<TSource> OrderBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector)
             where TSource : class
         {
             if (source == null)
@@ -1184,8 +995,8 @@ namespace System.Linq
             return source.CreateNewOrderedQueryable(orderedQuery);
         }
 
-
-        public static IOrderedManualIncludableQueryable<TSource> OrderBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, IComparer<TKey> comparer)
+        public static IOrderedManualIncludableQueryable<TSource> OrderBy<TSource, TKey>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector, IComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -1200,7 +1011,8 @@ namespace System.Linq
             return source.CreateNewOrderedQueryable(orderedQuery);
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> OrderByDescending<TSource, TKey>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector)
+        public static IOrderedManualIncludableQueryable<TSource> OrderByDescending<TSource, TKey>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector)
             where TSource : class
         {
             if (source == null)
@@ -1215,7 +1027,8 @@ namespace System.Linq
             return source.CreateNewOrderedQueryable(orderedQuery);
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> OrderByDescending<TSource, TKey>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, IComparer<TKey> comparer)
+        public static IOrderedManualIncludableQueryable<TSource> OrderByDescending<TSource, TKey>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector, IComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -1258,7 +1071,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IQueryable<TResult> Select<TSource, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, TResult>> selector)
+        public static IQueryable<TResult> Select<TSource, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TResult>> selector)
             where TSource : class
         {
             if (source == null)
@@ -1269,7 +1083,8 @@ namespace System.Linq
             return source.GetQueryable().Select(selector);
         }
 
-        public static IQueryable<TResult> Select<TSource, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, int, TResult>> selector)
+        public static IQueryable<TResult> Select<TSource, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, int, TResult>> selector)
             where TSource : class
         {
             if (source == null)
@@ -1280,7 +1095,9 @@ namespace System.Linq
             return source.GetQueryable().Select(selector);
         }
 
-        public static IQueryable<TResult> SelectMany<TSource, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, IEnumerable<TResult>>> selector)
+        public static IQueryable<TResult> SelectMany<TSource, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource,
+                IEnumerable<TResult>>> selector)
             where TSource : class
         {
             if (source == null)
@@ -1291,7 +1108,9 @@ namespace System.Linq
             return source.GetQueryable().SelectMany(selector);
         }
 
-        public static IQueryable<TResult> SelectMany<TSource, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, int, IEnumerable<TResult>>> selector)
+        public static IQueryable<TResult> SelectMany<TSource, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, int,
+                IEnumerable<TResult>>> selector)
             where TSource : class
         {
             if (source == null)
@@ -1302,7 +1121,9 @@ namespace System.Linq
             return source.GetQueryable().SelectMany(selector);
         }
 
-        public static IQueryable<TResult> SelectMany<TSource, TCollection, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, IEnumerable<TCollection>>> collectionSelector, Expression<Func<TSource, TCollection, TResult>> resultSelector)
+        public static IQueryable<TResult> SelectMany<TSource, TCollection, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, IEnumerable<TCollection>>> collectionSelector,
+            Expression<Func<TSource, TCollection, TResult>> resultSelector)
             where TSource : class
         {
             if (source == null)
@@ -1313,7 +1134,9 @@ namespace System.Linq
             return source.GetQueryable().SelectMany(collectionSelector, resultSelector);
         }
 
-        public static IQueryable<TResult> SelectMany<TSource, TCollection, TResult>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, int, IEnumerable<TCollection>>> collectionSelector, Expression<Func<TSource, TCollection, TResult>> resultSelector)
+        public static IQueryable<TResult> SelectMany<TSource, TCollection, TResult>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, int, IEnumerable<TCollection>>> collectionSelector,
+            Expression<Func<TSource, TCollection, TResult>> resultSelector)
             where TSource : class
         {
             if (source == null)
@@ -1335,7 +1158,8 @@ namespace System.Linq
             return source1.GetQueryable().SequenceEqual(source2);
         }
 
-        public static bool SequenceEqual<TSource>(this IManualIncludableQueryable<TSource> source1, IEnumerable<TSource> source2, IEqualityComparer<TSource> comparer)
+        public static bool SequenceEqual<TSource>(this IManualIncludableQueryable<TSource> source1, IEnumerable<TSource> source2,
+            IEqualityComparer<TSource> comparer)
             where TSource : class
         {
             if (source1 == null)
@@ -1374,7 +1198,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> SkipWhile<TSource>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, bool>> predicate)
+        public static IManualIncludableQueryable<TSource> SkipWhile<TSource>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, bool>> predicate)
             where TSource : class
         {
             if (source == null)
@@ -1388,7 +1213,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> SkipWhile<TSource>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, int, bool>> predicate)
+        public static IManualIncludableQueryable<TSource> SkipWhile<TSource>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, int, bool>> predicate)
             where TSource : class
         {
             if (source == null)
@@ -1540,7 +1366,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> TakeWhile<TSource>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, bool>> predicate)
+        public static IManualIncludableQueryable<TSource> TakeWhile<TSource>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, bool>> predicate)
             where TSource : class
         {
             if (source == null)
@@ -1554,7 +1381,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> TakeWhile<TSource>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, int, bool>> predicate)
+        public static IManualIncludableQueryable<TSource> TakeWhile<TSource>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, int, bool>> predicate)
             where TSource : class
         {
             if (source == null)
@@ -1568,7 +1396,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> ThenBy<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector)
+        public static IOrderedManualIncludableQueryable<TSource> ThenBy<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector)
             where TSource : class
         {
             if (source == null)
@@ -1583,7 +1412,9 @@ namespace System.Linq
             return source.CreateNewReplaceOrdredQueryable(newOrderedQuery);
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> ThenBy<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, IComparer<TKey> comparer)
+        public static IOrderedManualIncludableQueryable<TSource> ThenBy<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            IComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -1598,7 +1429,8 @@ namespace System.Linq
             return source.CreateNewReplaceOrdredQueryable(newOrderedQuery);
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> ThenByDescending<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector)
+        public static IOrderedManualIncludableQueryable<TSource> ThenByDescending<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector)
             where TSource : class
         {
             if (source == null)
@@ -1613,7 +1445,9 @@ namespace System.Linq
             return source.CreateNewReplaceOrdredQueryable(newOrderedQuery);
         }
 
-        public static IOrderedManualIncludableQueryable<TSource> ThenByDescending<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source, Expression<Func<TSource, TKey>> keySelector, IComparer<TKey> comparer)
+        public static IOrderedManualIncludableQueryable<TSource> ThenByDescending<TSource, TKey>(this IOrderedManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, TKey>> keySelector,
+            IComparer<TKey> comparer)
             where TSource : class
         {
             if (source == null)
@@ -1642,7 +1476,9 @@ namespace System.Linq
             return source1.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> Union<TSource>(this IManualIncludableQueryable<TSource> source1, IEnumerable<TSource> source2, IEqualityComparer<TSource> comparer)
+        public static IManualIncludableQueryable<TSource> Union<TSource>(this IManualIncludableQueryable<TSource> source1,
+            IEnumerable<TSource> source2,
+            IEqualityComparer<TSource> comparer)
             where TSource : class
         {
             if (source1 == null)
@@ -1671,7 +1507,8 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IManualIncludableQueryable<TSource> Where<TSource>(this IManualIncludableQueryable<TSource> source, Expression<Func<TSource, int, bool>> predicate)
+        public static IManualIncludableQueryable<TSource> Where<TSource>(this IManualIncludableQueryable<TSource> source,
+            Expression<Func<TSource, int, bool>> predicate)
             where TSource : class
         {
             if (source == null)
@@ -1685,7 +1522,9 @@ namespace System.Linq
             return source.CreateNewReplaceQueryable(newQueryable);
         }
 
-        public static IQueryable<TResult> Zip<TFirst, TSecond, TResult>(this IManualIncludableQueryable<TFirst> source1, IEnumerable<TSecond> source2, Expression<Func<TFirst, TSecond, TResult>> resultSelector)
+        public static IQueryable<TResult> Zip<TFirst, TSecond, TResult>(this IManualIncludableQueryable<TFirst> source1,
+            IEnumerable<TSecond> source2,
+            Expression<Func<TFirst, TSecond, TResult>> resultSelector)
              where TFirst : class
         {
             if (source1 == null)

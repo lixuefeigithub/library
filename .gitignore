@@ -1,0 +1,11 @@
+/DevLibrary/EFCore2.2Library/bin/*
+/DevLibrary/EFCore2.2Library/obj/*
+/DevLibrary/EFCoreLibrary/bin/*
+/DevLibrary/EFCoreLibrary/obj/*
+/DevLibrary/LinqLibrary/bin/*
+/DevLibrary/LinqLibrary/obj/*
+/DevLibrary/ReflectionLibrary/bin/*
+/DevLibrary/ReflectionLibrary/obj/*
+/DevLibrary/WinFormsLibrary/bin/*
+/DevLibrary/WinFormsLibrary/obj/*
+/DevLibrary/.vs/*

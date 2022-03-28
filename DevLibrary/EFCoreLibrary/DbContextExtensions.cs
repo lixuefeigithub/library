@@ -6,7 +6,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 
-namespace EFCore3Library
+namespace EFCoreLibrary
 {
     public static class DbContextExtensions
     {
