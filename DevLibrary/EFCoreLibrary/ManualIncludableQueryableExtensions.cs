@@ -17,7 +17,7 @@
                 return null;
             }
 
-            var query = EntityFrameworkManualIncludableQueryable<TEntity, TEntity>.CreateEmptyManualIncludableQueryable(source, dbContext);
+            var query = EFManualIncludableQueryable<TEntity, TEntity>.CreateEmptyManualIncludableQueryable(source, dbContext);
 
             return query;
         }
@@ -38,7 +38,7 @@
                 return null;
             }
 
-            var query = EntityFrameworkOrderedManualIncludableQueryable<TEntity, TEntity>.CreateEmptyOrderedManualIncludableQueryable(source, dbContext);
+            var query = EFOrderedManualIncludableQueryable<TEntity, TEntity>.CreateEmptyOrderedManualIncludableQueryable(source, dbContext);
 
             return query;
         }
@@ -65,7 +65,7 @@
                 return null;
             }
 
-            var includableQuery = EntityFrameworkManualIncludableQueryable<TEntity, TNavigation>.CreateFirstIncludeChainQuery(source,
+            var includableQuery = EFManualIncludableQueryable<TEntity, TNavigation>.CreateFirstIncludeChainQuery(source,
                 navigationPropertyPath,
                 dbContext,
                 isOneToOne: isOneToOne,
@@ -151,7 +151,7 @@
                 return null;
             }
 
-            var includableQuery = EntityFrameworkOrderedManualIncludableQueryable<TEntity, TNavigation>.CreateFirstIncludeChainQuery(source,
+            var includableQuery = EFOrderedManualIncludableQueryable<TEntity, TNavigation>.CreateFirstIncludeChainQuery(source,
                 navigationPropertyPath,
                 dbContext,
                 isOneToOne: isOneToOne,

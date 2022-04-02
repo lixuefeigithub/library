@@ -9,3 +9,5 @@
 /DevLibrary/WinFormsLibrary/bin/*
 /DevLibrary/WinFormsLibrary/obj/*
 /DevLibrary/.vs/*
+/DevLibrary/DevLibrary/bin/*
+/DevLibrary/DevLibrary/obj/*

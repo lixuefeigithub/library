@@ -649,7 +649,14 @@ namespace EFCoreLibrary
                 throw new ArgumentNullException(nameof(type));
             }
 
-            return type.GetInterfaces()
+            var interfaces = type.GetInterfaces();
+
+            if (interfaces.Any(x => x == typeof(IEnumerable)))
+            {
+                return true;
+            }
+
+            return interfaces
                             .Any(x => x.IsGenericType &&
                             x.GetGenericTypeDefinition() == typeof(IEnumerable<>));
         }

@@ -10,18 +10,133 @@ namespace EFCoreLibrary
 {
     public static class DbContextExtensions
     {
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entity"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
+        #region one way combine
+
+        public static void LoadNavigations<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
-            Expression<Func<TEntity, ICollection<TNavigation>>> navigationPropertyPath,
+            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            bool isTracking = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entity == null)
+            {
+                return;
+            }
+
+            dbContext.LoadNavigations<TEntity, TNavigation>(new TEntity[] { entity }, navigationPropertyPath, isTracking: isTracking);
+        }
+
+        public static void LoadNavigations<TEntity, TNavigation>(this DbContext dbContext,
+            IEnumerable<TEntity> entities,
+            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            bool isTracking = false,
+            bool isOneToOne = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entities == null || !entities.Any())
+            {
+                return;
+            }
+
+            var manualIncludeType = EFManualIncludableQueryableHelper.GetManualIncludeType(navigationPropertyPath, dbContext);
+
+            switch (manualIncludeType)
+            {
+                case EFManualIncludableQueryableHelper.ManualIncludeType.OneToMany:
+                    Type collectionElementType = typeof(TNavigation).GetGenericArguments().First();
+
+                    Type targetType = typeof(IEnumerable<>).MakeGenericType(collectionElementType);
+
+                    LambdaExpression navigationPropertyPathConverted = navigationPropertyPath;
+
+                    if (targetType != typeof(TNavigation))
+                    {
+                        Type delegateType = typeof(Func<,>).MakeGenericType(typeof(TEntity), targetType);
+
+                        var propertyInfo = ManualIncludableQueryableHelper.GetPropertyInfo(navigationPropertyPath);
+
+                        var parameter = Expression.Parameter(typeof(TEntity));
+                        var memberExpression = Expression.Property(parameter, propertyInfo.Name);
+
+                        navigationPropertyPathConverted = Expression.Lambda(delegateType, memberExpression, parameter);
+                    }
+
+                    LoadCollectionManyNavigationsMethodInfo
+                        .MakeGenericMethod(typeof(TEntity), collectionElementType)
+                        .Invoke(null, new object[] { dbContext, entities, navigationPropertyPathConverted, isTracking });
+
+                    break;
+
+                case EFManualIncludableQueryableHelper.ManualIncludeType.OneToManyUnique:
+                    dbContext.LoadOneToManyUniqueEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking);
+                    break;
+                case EFManualIncludableQueryableHelper.ManualIncludeType.ManyToOne:
+                    dbContext.LoadManyToOneEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking, isOneToOne: isOneToOne);
+                    break;
+                default:
+                    throw new NotImplementedException();
+            }
+        }
+
+        #endregion
+
+        #region 2 ways with return value
+
+        public static TNavigation LoadOneNavigation<TEntity, TNavigation>(this DbContext dbContext,
+            TEntity entity,
+            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            bool isTracking = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entity == null)
+            {
+                return null;
+            }
+
+            var result = dbContext.LoadOneNavigations<TEntity, TNavigation>(new TEntity[] { entity }, navigationPropertyPath, isTracking: isTracking);
+
+            return result?.FirstOrDefault();
+        }
+
+        public static List<TNavigation> LoadOneNavigations<TEntity, TNavigation>(this DbContext dbContext,
+            IEnumerable<TEntity> entities,
+            Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            bool isTracking = false,
+            bool isOneToOne = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entities == null || !entities.Any())
+            {
+                return new List<TNavigation>();
+            }
+
+            var manualIncludeType = EFManualIncludableQueryableHelper.GetManualIncludeType(navigationPropertyPath, dbContext);
+
+            switch (manualIncludeType)
+            {
+                case EFManualIncludableQueryableHelper.ManualIncludeType.OneToMany:
+                    throw new ArgumentException(nameof(TNavigation));
+                case EFManualIncludableQueryableHelper.ManualIncludeType.OneToManyUnique:
+                    return dbContext.LoadOneToManyUniqueEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking);
+                case EFManualIncludableQueryableHelper.ManualIncludeType.ManyToOne:
+                    return dbContext.LoadManyToOneEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking, isOneToOne: isOneToOne);
+                default:
+                    throw new NotImplementedException();
+            }
+        }
+
+        private static readonly MethodInfo LoadCollectionManyNavigationsMethodInfo = typeof(DbContextExtensions)
+            .GetTypeInfo()
+            .GetDeclaredMethods(nameof(LoadManyNavigations))
+            .Single(x => IsIEnumerable(x.GetParameters()[1].ParameterType));
+
+        public static List<TNavigation> LoadManyNavigations<TEntity, TNavigation>(this DbContext dbContext,
+            TEntity entity,
+            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
             bool isTracking = false)
             where TEntity : class
             where TNavigation : class
@@ -31,87 +146,41 @@ namespace EFCoreLibrary
                 return new List<TNavigation>();
             }
 
-            var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
-
-            var navigationPropertyInfo = navigationPropertyPath.GetPropertyInfo();
-            var navigation = entityType.FindNavigation(navigationPropertyInfo.Name);
-
-            if (navigation == null)
-            {
-                throw new ArgumentException("Cannot find navigation property", nameof(navigationPropertyPath));
-            }
-
-            var navigationForeignKey = navigation.ForeignKey;
-
-            if (navigation.ForeignKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("method not support for FK > 1");
-            }
-
-            var navigationForeignKeyProperty = navigation.ForeignKey.Properties.Single();
-
-            var inversePkNavigationProperty = navigationForeignKey.DependentToPrincipal;
-
-            var inversePkNavigationPropertyInfo = inversePkNavigationProperty.PropertyInfo;
-
-            var fkName = navigationForeignKeyProperty.Name;
-
-            if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("method not support for FK > 1");
-            }
-
-            var pkProperty = navigationForeignKey.PrincipalKey.Properties.Single();
-
-            if (pkProperty.DeclaringEntityType != entityType)
-            {
-                throw new NotImplementedException("method not support for many to many relationship");
-            }
-
-            var entityPks = entityType.FindPrimaryKey();
-
-            if (entityPks.Properties.Count != 1)
-            {
-                throw new NotImplementedException("method not support for FK > 1");
-            }
-
-            var entityPk = entityPks.Properties.Single();
-
-            var primaryKey = pkProperty.PropertyInfo.GetValue(entity);
-
-            var filterPropertyExpression = GetPropertySelector<TNavigation>(fkName);
-            var filterExpression = filterPropertyExpression.ConvertToEqualsExpr(primaryKey);
-
-            var query = dbContext.Set<TNavigation>()
-                .AsQueryable();
-
-            if (!isTracking)
-            {
-                query = query.AsNoTracking();
-            }
-
-            query = Queryable.Where(query, (dynamic)filterExpression);
-
-            var navigationEntities = query.ToList();
-
-            navigationPropertyInfo.SetValue(entity, navigationEntities);
-            navigationEntities.ForEach(x => inversePkNavigationPropertyInfo.SetValue(x, entity));
-
-            return navigationEntities;
+            return dbContext.LoadOneToManyEntities<TEntity, TNavigation>(entity, navigationPropertyPath, isTracking: isTracking);
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entities"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
+        public static List<TNavigation> LoadManyNavigations<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
-            Expression<Func<TEntity, ICollection<TNavigation>>> navigationPropertyPath,
+            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
+            bool isTracking = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            return dbContext.LoadOneToManyEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking);
+        }
+
+        #endregion
+
+        #region original 3 ways
+
+        private static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
+            TEntity entity,
+            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
+            bool isTracking = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entity == null)
+            {
+                return new List<TNavigation>();
+            }
+
+            return dbContext.LoadOneToManyEntities<TEntity, TNavigation>(new TEntity[] { entity }, navigationPropertyPath, isTracking: isTracking);
+        }
+
+        private static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
+            IEnumerable<TEntity> entities,
+            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
             bool isTracking = false)
             where TEntity : class
             where TNavigation : class
@@ -211,16 +280,7 @@ namespace EFCoreLibrary
             return allNavigationEntities;
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entity"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static TNavigation LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
+        private static TNavigation LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -232,84 +292,16 @@ namespace EFCoreLibrary
                 return null;
             }
 
-            if (IsICollection(typeof(TNavigation)))
-            {
-                throw new ArgumentException(nameof(TNavigation));
-            }
+            var result = dbContext.LoadManyToOneEntities<TEntity, TNavigation>(new TEntity[] { entity },
+                navigationPropertyPath,
+                isTracking: isTracking,
+                //just one entity so must be one to one
+                isOneToOne: true);
 
-            var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
-
-            var navigationPropertyInfo = navigationPropertyPath.GetPropertyInfo();
-            var navigation = entityType.FindNavigation(navigationPropertyInfo.Name);
-
-            if (navigation == null)
-            {
-                throw new ArgumentException("Cannot find navigation property", nameof(navigationPropertyPath));
-            }
-
-            var navigationForeignKey = navigation.ForeignKey;
-
-            if (navigation.ForeignKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("No FK or more than one FK column");
-            }
-
-            var navigationForeignKeyProperty = navigation.ForeignKey.Properties.Single();
-
-            var navigationForeignKeyPropertyInfo = navigationForeignKeyProperty.PropertyInfo;
-
-            var keyValueObj = navigationForeignKeyPropertyInfo.GetValue(entity);
-
-            if (keyValueObj == null)
-            {
-                //nullable FK
-                return null;
-            }
-
-            if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("No PK or more than one PK column");
-            }
-
-            var pkProperty = navigationForeignKey.PrincipalKey.Properties.Single();
-
-            if (pkProperty.DeclaringEntityType.Name != typeof(TNavigation).FullName)
-            {
-                throw new NotImplementedException("method not support for many to many relationship");
-            }
-
-            var pkName = pkProperty.Name;
-
-            var filterPropertyExpression = GetPropertySelector<TNavigation>(pkName);
-            var filterExpression = filterPropertyExpression.ConvertToEqualsExpr(keyValueObj);
-
-            var query = dbContext.Set<TNavigation>()
-                .AsQueryable();
-
-            if (!isTracking)
-            {
-                query = query.AsNoTracking();
-            }
-
-            query = Queryable.Where(query, (dynamic)filterExpression);
-
-            var navigationEntity = query.FirstOrDefault();
-
-            navigationPropertyInfo.SetValue(entity, navigationEntity);
-
-            return navigationEntity;
+            return result?.FirstOrDefault();
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entities"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static List<TNavigation> LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
+        private static List<TNavigation> LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false,
@@ -322,7 +314,7 @@ namespace EFCoreLibrary
                 return new List<TNavigation>();
             }
 
-            if (IsICollection(typeof(TNavigation)))
+            if (IsIEnumerable(typeof(TNavigation)))
             {
                 throw new ArgumentException(nameof(TNavigation));
             }
@@ -415,16 +407,7 @@ namespace EFCoreLibrary
             return navigationEntities;
         }
 
-        /// <summary>
-        /// A one-to-many relationship with unique index 
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entities"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static TNavigation LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
+        private static TNavigation LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -436,101 +419,14 @@ namespace EFCoreLibrary
                 return null;
             }
 
-            if (IsICollection(typeof(TNavigation)))
-            {
-                throw new ArgumentException(nameof(TNavigation));
-            }
+            var result = dbContext.LoadOneToManyUniqueEntities<TEntity, TNavigation>(new TEntity[] { entity },
+                navigationPropertyPath,
+                isTracking: isTracking);
 
-            var entityType = dbContext.Model.FindEntityType(typeof(TEntity).FullName);
-
-            var navigationPropertyInfo = navigationPropertyPath.GetPropertyInfo();
-            var navigation = entityType.FindNavigation(navigationPropertyInfo.Name);
-
-            if (navigation == null)
-            {
-                throw new ArgumentException("Cannot find navigation property", nameof(navigationPropertyPath));
-            }
-
-            var navigationForeignKey = navigation.ForeignKey;
-
-            if (navigation.ForeignKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("method not support for FK > 1");
-            }
-
-            var navigationForeignKeyProperty = navigation.ForeignKey.Properties.Single();
-
-            var inversePkNavigationProperty = navigationForeignKey.DependentToPrincipal;
-
-            var inversePkNavigationPropertyInfo = inversePkNavigationProperty.PropertyInfo;
-
-            var fkName = navigationForeignKeyProperty.Name;
-
-            if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
-            {
-                throw new NotImplementedException("method not support for FK > 1");
-            }
-
-            var pkProperty = navigationForeignKey.PrincipalKey.Properties.Single();
-
-            if (pkProperty.DeclaringEntityType != entityType)
-            {
-                throw new NotImplementedException("method not support for many to many relationship");
-            }
-
-            var entityPks = entityType.FindPrimaryKey();
-
-            if (entityPks.Properties.Count != 1)
-            {
-                throw new NotImplementedException("method not support for FK > 1");
-            }
-
-            var entityPk = entityPks.Properties.Single();
-
-            var pkSelector = FastInvoke.BuildUntypedGetter<TEntity>(entityPk.PropertyInfo);
-
-            var primaryKey = pkSelector(entity);
-
-            var filterPropertyExpression = GetPropertySelector<TNavigation>(fkName);
-            var filterExpression = filterPropertyExpression.ConvertToEqualsExpr(primaryKey);
-
-            var query = dbContext.Set<TNavigation>()
-                .AsQueryable();
-
-            if (!isTracking)
-            {
-                query = query.AsNoTracking();
-            }
-
-            query = Queryable.Where(query, (dynamic)filterExpression);
-
-            var navigationEntity = query.FirstOrDefault();
-
-            if (navigationEntity != null)
-            {
-                var fkSelector = FastInvoke.BuildUntypedGetter<TNavigation>(navigationForeignKeyProperty.PropertyInfo);
-
-                var navigationPropertySetter = FastInvoke.BuildUntypedSetter<TEntity>(navigationPropertyInfo);
-                var inversePkNavigationPropertySetter = FastInvoke.BuildUntypedSetter<TNavigation>(inversePkNavigationPropertyInfo);
-
-                navigationPropertySetter(entity, navigationEntity);
-
-                inversePkNavigationPropertySetter(navigationEntity, entity);
-            }
-
-            return navigationEntity;
+            return result?.FirstOrDefault();
         }
 
-        /// <summary>
-        /// A one-to-many relationship with unique index 
-        /// </summary>
-        /// <typeparam name="TEntity"></typeparam>
-        /// <typeparam name="TNavigation"></typeparam>
-        /// <param name="dbContext"></param>
-        /// <param name="entities"></param>
-        /// <param name="navigationPropertyPath"></param>
-        /// <param name="isTracking"></param>
-        public static List<TNavigation> LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
+        private static List<TNavigation> LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -636,6 +532,8 @@ namespace EFCoreLibrary
 
             return allNavigationEntities;
         }
+
+        #endregion
 
         private static PropertyInfo GetPropertyInfo<TSource, TProperty>(this Expression<Func<TSource, TProperty>> propertyLambda)
         {
@@ -755,16 +653,23 @@ namespace EFCoreLibrary
             return Expression.Lambda(call, pe);
         }
 
-        private static bool IsICollection(Type type)
+        private static bool IsIEnumerable(Type type)
         {
             if (type == null)
             {
                 throw new ArgumentNullException(nameof(type));
             }
 
-            return type.GetInterfaces()
+            var interfaces = type.GetInterfaces();
+
+            if (interfaces.Any(x => x == typeof(IEnumerable)))
+            {
+                return true;
+            }
+
+            return interfaces
                             .Any(x => x.IsGenericType &&
-                            x.GetGenericTypeDefinition() == typeof(ICollection<>));
+                            x.GetGenericTypeDefinition() == typeof(IEnumerable<>));
         }
 
         private static bool IsNullableType(Type source)
