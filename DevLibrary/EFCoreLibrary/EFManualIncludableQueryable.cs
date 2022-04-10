@@ -852,7 +852,7 @@ namespace EFCoreLibrary
                 navigationQuery = sourceQueryFiltered.Select(_navigationPropertySelector);
             }
 
-            if (!_isOneToOne)
+            if (!_isOneToOne && !_isInvokeDistinctInMemory)
             {
                 navigationQuery = navigationQuery.Distinct();
             }
