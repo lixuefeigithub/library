@@ -687,8 +687,84 @@ namespace EFCoreLibrary
             }
         }
 
-        public static IQueryable<TNavigation> BuildJoinQuerySelectInner<TEntity, TNavigation>(IQueryable<TEntity> outerQuery,
-            IQueryable<TNavigation> interQuery,
+        private static readonly MethodInfo LeftJoinMethod = typeof(ManualIncludableQueryableHelper)
+           .GetTypeInfo()
+           .GetDeclaredMethods(nameof(LeftJoin))
+           .Single();
+
+        private static readonly MethodInfo LeftJoinSelectAllMethod = typeof(ManualIncludableQueryableHelper)
+            .GetTypeInfo()
+            .GetDeclaredMethods(nameof(LeftJoinSelectAll))
+            .Single();
+
+        public static IQueryable<TNavigation> BuildJoinQueryToSelectOneToManyNavigation<TEntity, TNavigation>(IQueryable<TEntity> entityOneQuery,
+            IQueryable<TNavigation> navigationManyQuery,
+            LambdaExpression entityOneSelector,
+            LambdaExpression navigationManySelector,
+            Type selectorKeyType)
+        {
+            //Always use left join instead of inner join to avoid SQL Server to create a nested query plan
+
+            var intermediateQuery = BuildLeftInnerJoinSelectAllQuery(outerQuery: entityOneQuery,
+                innerQuery: navigationManyQuery,
+                outerSelector: entityOneSelector,
+                innerSelector: navigationManySelector,
+                selectorKeyType: selectorKeyType);
+
+            var query = intermediateQuery
+                .Where(x => x.RightInner != null)
+                .Select(x => x.RightInner);
+
+            return query;
+
+            //If not use left join
+            //return BuildInnerJoinQuerySelectInnerEntity(outerQuery: entityOneQuery,
+            //    innerQuery: navigationManyQueryFilteredOutNullableFkForEntity,
+            //    outerSelector: entityOneSelector,
+            //    innerSelector: navigationManySelector,
+            //    selectorKeyType: selectorKeyType);
+        }
+
+        public static IQueryable<TNavigation> BuildJoinQueryToSelectOneToManyUniqueNavigation<TEntity, TNavigation>(IQueryable<TEntity> entityOneQuery,
+            IQueryable<TNavigation> navigationOneQuery,
+            LambdaExpression entityOneSelector,
+            LambdaExpression navigationOneSelector,
+            Type selectorKeyType)
+        {
+            //For now we use auto include for one to one, so not a problem with join/left join
+            //so far we are not sure if the inner join is a problem in a chain, but we thing it's not a problem
+            return BuildInnerJoinQuerySelectInnerEntity(outerQuery: entityOneQuery,
+                innerQuery: navigationOneQuery,
+                outerSelector: entityOneSelector,
+                innerSelector: navigationOneSelector,
+                selectorKeyType: selectorKeyType);
+        }
+
+        public static IQueryable<TNavigation> BuildJoinQueryToSelectManyToOneNavigation<TEntity, TNavigation>(IQueryable<TEntity> entityManyQueryFilteredOutNullFkForNavigation,
+            IQueryable<TNavigation> navigationOneQuery,
+            LambdaExpression entityManySelector,
+            LambdaExpression navigationOneSelector,
+            Type selectorKeyType)
+        {
+            //Normally if single many to one inner join the SQL will not execute a nested query
+            //But when in a chain like many to one, one to many, many to one, it may have a nested query plan
+            //So be safer for many to one we use left join too
+            return BuildLeftInnerJoinQuerySelectInnerEntity(outerQuery: entityManyQueryFilteredOutNullFkForNavigation,
+                innerQuery: navigationOneQuery,
+                outerSelector: entityManySelector,
+                innerSelector: navigationOneSelector,
+                selectorKeyType: selectorKeyType);
+
+            //if not use left join
+            //return BuildInnerJoinQuerySelectInnerEntity(outerQuery: entityManyQueryFilteredOutNullFkForNavigation,
+            //    innerQuery: navigationOneQuery,
+            //    outerSelector: entityManySelector,
+            //    innerSelector: navigationOneSelector,
+            //    selectorKeyType: selectorKeyType);
+        }
+
+        private static IQueryable<TNavigation> BuildInnerJoinQuerySelectInnerEntity<TEntity, TNavigation>(IQueryable<TEntity> outerQuery,
+            IQueryable<TNavigation> innerQuery,
             LambdaExpression outerSelector,
             LambdaExpression innerSelector,
             Type selectorKeyType)
@@ -697,11 +773,96 @@ namespace EFCoreLibrary
 
             object result = JoinMethod
                     .MakeGenericMethod(typeof(TEntity), typeof(TNavigation), selectorKeyType, typeof(TNavigation))
-                    .Invoke(null, new object[] { outerQuery, interQuery, outerSelector, innerSelector, resultSelector });
+                    .Invoke(null, new object[] { outerQuery, innerQuery, outerSelector, innerSelector, resultSelector });
 
             var resultQuery = result as IQueryable<TNavigation>;
 
             return resultQuery;
+        }
+
+        private static IQueryable<TNavigation> BuildLeftInnerJoinQuerySelectInnerEntity<TEntity, TNavigation>(IQueryable<TEntity> outerQuery,
+            IQueryable<TNavigation> innerQuery,
+            LambdaExpression outerSelector,
+            LambdaExpression innerSelector,
+            Type selectorKeyType)
+        {
+            Expression<Func<TEntity, TNavigation, TNavigation>> resultSelector = (left, right) => right;
+
+            object result = LeftJoinMethod
+                    .MakeGenericMethod(typeof(TEntity), typeof(TNavigation), selectorKeyType, typeof(TNavigation))
+                    .Invoke(null, new object[] { outerQuery, innerQuery, outerSelector, innerSelector, resultSelector });
+
+            var resultQuery = result as IQueryable<TNavigation>;
+
+            return resultQuery;
+        }
+
+        private static IQueryable<LeftJoinResult<TEntity, TNavigation>> BuildLeftInnerJoinSelectAllQuery<TEntity, TNavigation>(IQueryable<TEntity> outerQuery,
+            IQueryable<TNavigation> innerQuery,
+            LambdaExpression outerSelector,
+            LambdaExpression innerSelector,
+            Type selectorKeyType)
+        {
+            object result = LeftJoinSelectAllMethod
+                    .MakeGenericMethod(typeof(TEntity), typeof(TNavigation), selectorKeyType)
+                    .Invoke(null, new object[] { outerQuery, innerQuery, outerSelector, innerSelector });
+
+            var resultQuery = result as IQueryable<LeftJoinResult<TEntity, TNavigation>>;
+
+            return resultQuery;
+        }
+
+        private static IQueryable<TResult> LeftJoin<TLeftQuery, TRightQuery, TKey, TResult>(
+            this IQueryable<TLeftQuery> leftQuery,
+            IQueryable<TRightQuery> rightQuery,
+            Expression<Func<TLeftQuery, TKey>> leftQueryKeySelector,
+            Expression<Func<TRightQuery, TKey>> rightQueryKeySelector,
+            Expression<Func<TLeftQuery, TRightQuery, TResult>> resultSelector)
+        {
+            var groupJoinQuery = leftQuery.LeftJoinSelectAll(rightQuery, leftQueryKeySelector, rightQueryKeySelector);
+
+            //Old parameter left
+            ParameterExpression paramResultSeletorLeft = resultSelector.Parameters.First();
+            ParameterExpression paramResultSeletorRight = resultSelector.Parameters.Skip(1).First();
+
+            //New parameter left.Outer
+            ParameterExpression paramNewResultSeletor = Expression.Parameter(typeof(LeftJoinResult<TLeftQuery, TRightQuery>), "x");
+
+            MemberExpression paramNewResultSeletorLeftOuter = Expression.Property(paramNewResultSeletor, nameof(LeftJoinResult<TLeftQuery, TRightQuery>.LeftOuter));
+            MemberExpression paramNewResultSeletorRightInner = Expression.Property(paramNewResultSeletor, nameof(LeftJoinResult<TLeftQuery, TRightQuery>.RightInner));
+
+            var resultSelectorBodyReplaceLeftOuterParam = new LeftJoinReplacer(paramResultSeletorLeft, paramNewResultSeletorLeftOuter).Visit(resultSelector.Body);
+            var resultSelectorBodyReplaceLeftOuterAndRightInnerParams = new LeftJoinReplacer(paramResultSeletorRight, paramNewResultSeletorRightInner).Visit(resultSelectorBodyReplaceLeftOuterParam);
+
+            var newResultSelector = Expression.Lambda<Func<LeftJoinResult<TLeftQuery, TRightQuery>, TResult>>(resultSelectorBodyReplaceLeftOuterAndRightInnerParams,
+                paramNewResultSeletor);
+
+            return groupJoinQuery.Select(newResultSelector);
+        }
+
+        private static IQueryable<LeftJoinResult<TLeftQuery, TRightQuery>> LeftJoinSelectAll<TLeftQuery, TRightQuery, TKey>(
+            this IQueryable<TLeftQuery> leftQuery,
+            IQueryable<TRightQuery> rightQuery,
+            Expression<Func<TLeftQuery, TKey>> leftQueryKeySelector,
+            Expression<Func<TRightQuery, TKey>> rightQueryKeySelector)
+        {
+            var groupJoinQuery = leftQuery
+                .GroupJoin(rightQuery,
+                    leftQueryKeySelector,
+                    rightQueryKeySelector,
+                    (outerObj, inners) => new LeftJoinCollectionModel<TLeftQuery, TRightQuery>
+                    {
+                        LeftOuter = outerObj,
+                        RightInners = inners
+                    })
+                .SelectMany(s => s.RightInners.DefaultIfEmpty(),
+                    (s, righInner) => new LeftJoinResult<TLeftQuery, TRightQuery>
+                    {
+                        LeftOuter = s.LeftOuter,
+                        RightInner = righInner
+                    });
+
+            return groupJoinQuery;
         }
 
         public static Func<T, object> BuildUntypedGetter<T>(MemberInfo memberInfo)
@@ -841,6 +1002,40 @@ namespace EFCoreLibrary
             public IEnumerable<object> Navigations { get; set; } = new List<object>();
 
             public List<LoadedNavigationInfo> LoadedNavigations { get; set; } = new List<LoadedNavigationInfo>();
+        }
+
+        private class LeftJoinResult<TLeftOuter, TRightInner>
+        {
+            public TLeftOuter LeftOuter { get; set; }
+            public TRightInner RightInner { get; set; }
+        }
+
+        private class LeftJoinReplacer : ExpressionVisitor
+        {
+            private readonly ParameterExpression _oldParam;
+            private readonly Expression _replacement;
+
+            public LeftJoinReplacer(ParameterExpression oldParam, Expression replacement)
+            {
+                _oldParam = oldParam;
+                _replacement = replacement;
+            }
+
+            public override Expression Visit(Expression exp)
+            {
+                if (exp == _oldParam)
+                {
+                    return _replacement;
+                }
+
+                return base.Visit(exp);
+            }
+        }
+
+        private class LeftJoinCollectionModel<TOuter, TInner>
+        {
+            public TOuter LeftOuter { get; set; }
+            public IEnumerable<TInner> RightInners { get; set; }
         }
     }
 }

@@ -67,12 +67,6 @@ namespace EFCoreLibrary
                 throw new ArgumentNullException(nameof(sourceQuery));
             }
 
-            if (sourceQuery.IsMissingOrderBeforeTakeOrSkip())
-            {
-                //If no order applied the SelectMany Translation is not good, so we do not allow this
-                throw new NotImplementedException("Must apply order by before take");
-            }
-
             IQueryable<TLastNavigation> navigationQuery;
 
             if (isUseJoin)
@@ -84,7 +78,7 @@ namespace EFCoreLibrary
                     navigationRawQuery = navigationRawQuery.AsNoTracking();
                 }
 
-                navigationQuery = ManualIncludableQueryableHelper.BuildJoinQuerySelectInner(sourceQuery,
+                navigationQuery = ManualIncludableQueryableHelper.BuildJoinQueryToSelectOneToManyNavigation(sourceQuery,
                     navigationRawQuery,
                     _pkSelectorExpressionForJoin,
                     _fkSelectorExpression,
@@ -245,36 +239,52 @@ namespace EFCoreLibrary
 
             var isAllNavigationsAlreadyLoaded = false;
 
-            if (hasLoadedNavigations)
+            var isNeedToOverwriteQuery = hasLoadedNavigations
+                //If take applied, we are not sure if has order by, of if the order by is good enough for join/select
+                //(in some cases if join another table and select another table then the order changed, even you have order by clause, the then by can be changed)
+                //So if source query has take then we force to use look up by id
+                //It should not have performance problem since if you have take then it will not be too many entities
+                || upperLevelQuery.HasAppliedTake();
+
+            if (isNeedToOverwriteQuery)
             {
-                var loadedFKKeysEnumerable = loadedNavigations.Select(x => _fkSelector(x));
-
-                if (_isFKNullable)
-                {
-                    loadedFKKeysEnumerable = loadedFKKeysEnumerable.Where(x => x != null);
-                }
-
-                var loadedFKKeys = loadedFKKeysEnumerable
-                    .Distinct()
-                    .ToList();
-
-                //if loaded keys to many and we filter by FK Not in (loaded key), it may timed out,
-                //so we overwrite the query, filter by FK in (all key - loaded key)
-
-                //Another thing is we don't have conditional include for now, so if one FK loaded, which means all navigations linked to this FK loaded, so we can query by FK instead of PK
-                //If we add conditional include in the future, which means we have to change this loaded logic, we have to filter loaded navigations by PK instead of FK, and the it may have more than one PK
-
                 var allFKKeys = entities.Select(_pkSelector).ToList();
 
-                var notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
+                var notLoadedFKKeys = new List<object>();
 
-                isAllNavigationsAlreadyLoaded = notLoadedFKKeys.Count == 0;
+                if (hasLoadedNavigations)
+                {
+                    var loadedFKKeysEnumerable = loadedNavigations.Select(x => _fkSelector(x));
 
-                var loadedFKKeysForCurrentInclude = allFKKeys.Except(notLoadedFKKeys).ToList();
+                    if (_isFKNullable)
+                    {
+                        loadedFKKeysEnumerable = loadedFKKeysEnumerable.Where(x => x != null);
+                    }
 
-                loadedNavigationsFilteredForThisInclude = loadedNavigations
-                    .Where(x => loadedFKKeysForCurrentInclude.Contains(_fkSelector(x)))
-                    .ToList();
+                    var loadedFKKeys = loadedFKKeysEnumerable
+                        .Distinct()
+                        .ToList();
+
+                    //if loaded keys to many and we filter by FK Not in (loaded key), it may timed out,
+                    //so we overwrite the query, filter by FK in (all key - loaded key)
+
+                    //Another thing is we don't have conditional include for now, so if one FK loaded, which means all navigations linked to this FK loaded, so we can query by FK instead of PK
+                    //If we add conditional include in the future, which means we have to change this loaded logic, we have to filter loaded navigations by PK instead of FK, and the it may have more than one PK
+
+                    notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
+
+                    isAllNavigationsAlreadyLoaded = notLoadedFKKeys.Count == 0;
+
+                    var loadedFKKeysForCurrentInclude = allFKKeys.Except(notLoadedFKKeys).ToList();
+
+                    loadedNavigationsFilteredForThisInclude = loadedNavigations
+                        .Where(x => loadedFKKeysForCurrentInclude.Contains(_fkSelector(x)))
+                        .ToList();
+                }
+                else
+                {
+                    notLoadedFKKeys = allFKKeys.ToList();
+                }
 
                 var navigationFkSelector = ManualIncludableQueryableHelper.GetPropertySelector<TLastNavigation>(_fkName);
                 var filterExpression = ManualIncludableQueryableHelper.ConvertToContainsExpr(navigationFkSelector, notLoadedFKKeys);
@@ -445,12 +455,6 @@ namespace EFCoreLibrary
                 throw new ArgumentNullException(nameof(sourceQuery));
             }
 
-            if (sourceQuery.IsMissingOrderBeforeTakeOrSkip())
-            {
-                //If no order applied the SelectMany Translation is not good, so we do not allow this
-                throw new NotImplementedException("Must apply order by before take");
-            }
-
             IQueryable<TLastNavigation> navigationQuery;
 
             if (isUseJoin)
@@ -462,7 +466,7 @@ namespace EFCoreLibrary
                     navigationRawQuery = navigationRawQuery.AsNoTracking();
                 }
 
-                navigationQuery = ManualIncludableQueryableHelper.BuildJoinQuerySelectInner(sourceQuery,
+                navigationQuery = ManualIncludableQueryableHelper.BuildJoinQueryToSelectOneToManyUniqueNavigation(sourceQuery,
                     navigationRawQuery,
                     _pkSelectorExpression,
                     _fkSelectorExpressionForJoin,
@@ -628,32 +632,48 @@ namespace EFCoreLibrary
 
             var isAllNavigationsAlreadyLoaded = false;
 
-            if (hasLoadedNavigations)
+            var isNeedToOverwriteQuery = hasLoadedNavigations
+               //If take applied, we are not sure if has order by, of if the order by is good enough for join/select
+               //(in some cases if join another table and select another table then the order changed, even you have order by clause, the then by can be changed)
+               //So if source query has take then we force to use look up by id
+               //It should not have performance problem since if you have take then it will not be too many entities
+               || upperLevelQuery.HasAppliedTake();
+
+            if (isNeedToOverwriteQuery)
             {
-                var loadedFKKeysQuery = loadedNavigations.Select(x => _fkSelector(x));
-
-                if (_isFKNullable)
-                {
-                    loadedFKKeysQuery = loadedFKKeysQuery.Where(x => x != null);
-                }
-
-                var loadedFKKeys = loadedFKKeysQuery
-                    .Distinct()
-                    .ToList();
-
-                //if loaded keys to many and we filter by FK Not in (loaded key), it may timed out,
-                //so we overwrite the query, filter by FK in (all key - loaded key)
-
-                //Another thing is we don't have conditional include for now, so if one FK loaded, which means all navigations linked to this FK loaded, so we can query by FK instead of PK
-                //If we add conditional include in the future, which means we have to change this loaded logic, we have to filter loaded navigations by PK instead of FK, and the it may have more than one PK
-
                 var allFKKeys = entities.Select(_pkSelector).ToList();
 
-                loadedNavigationsFilteredForThisInclude.AddRange(loadedNavigations.Where(x => allFKKeys.Contains(_fkSelector(x))));
+                var notLoadedFKKeys = new List<object>();
 
-                var notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
+                if (hasLoadedNavigations)
+                {
+                    var loadedFKKeysQuery = loadedNavigations.Select(x => _fkSelector(x));
 
-                isAllNavigationsAlreadyLoaded = notLoadedFKKeys.Count == 0;
+                    if (_isFKNullable)
+                    {
+                        loadedFKKeysQuery = loadedFKKeysQuery.Where(x => x != null);
+                    }
+
+                    var loadedFKKeys = loadedFKKeysQuery
+                        .Distinct()
+                        .ToList();
+
+                    //if loaded keys to many and we filter by FK Not in (loaded key), it may timed out,
+                    //so we overwrite the query, filter by FK in (all key - loaded key)
+
+                    //Another thing is we don't have conditional include for now, so if one FK loaded, which means all navigations linked to this FK loaded, so we can query by FK instead of PK
+                    //If we add conditional include in the future, which means we have to change this loaded logic, we have to filter loaded navigations by PK instead of FK, and the it may have more than one PK
+
+                    loadedNavigationsFilteredForThisInclude.AddRange(loadedNavigations.Where(x => allFKKeys.Contains(_fkSelector(x))));
+
+                    notLoadedFKKeys = allFKKeys.Except(loadedFKKeys).ToList();
+
+                    isAllNavigationsAlreadyLoaded = notLoadedFKKeys.Count == 0;
+                }
+                else
+                {
+                    notLoadedFKKeys = allFKKeys.ToList();
+                }
 
                 var navigationFkSelector = ManualIncludableQueryableHelper.GetPropertySelector<TLastNavigation>(_fkName);
                 var filterExpression = ManualIncludableQueryableHelper.ConvertToContainsExpr(navigationFkSelector, notLoadedFKKeys);
@@ -841,7 +861,7 @@ namespace EFCoreLibrary
                     navigationRawQuery = navigationRawQuery.AsNoTracking();
                 }
 
-                navigationQuery = ManualIncludableQueryableHelper.BuildJoinQuerySelectInner(sourceQueryFiltered,
+                navigationQuery = ManualIncludableQueryableHelper.BuildJoinQueryToSelectManyToOneNavigation(sourceQueryFiltered,
                     navigationRawQuery,
                     _fkSelectorExpression,
                     _pkSelectorExpressionForJoin,
@@ -1016,7 +1036,13 @@ namespace EFCoreLibrary
             var loadedNavigationsFilteredForThisInclude = new List<TLastNavigation>();
 
             //If has too many loaded navigations the query performance is bad, so if has loaded navigation we force re-write query
-            var isNeedToOverwriteQuery = hasLoadedNavigations || _isInvokeDistinctInMemory;
+            var isNeedToOverwriteQuery = hasLoadedNavigations
+                || _isInvokeDistinctInMemory
+                //If take applied, we are not sure if has order by, of if the order by is good enough for join/select
+                //(in some cases if join another table and select another table then the order changed, even you have order by clause, the then by can be changed)
+                //So if source query has take then we force to use look up by id
+                //It should not have performance problem since if you have take then it will not be too many entities
+                || upperLevelQuery.HasAppliedTake();
 
             var isAllNavigationsAlreadyLoaded = false;
 
@@ -2125,7 +2151,6 @@ namespace EFCoreLibrary
                 foreach (var node in chain)
                 {
                     var sameNavigationLoaded = loadedNavigations
-                        .Where(x => x.LastNavigationType == node.LastNavigationType)
                         .Where(x => x.LastEntityType == node.LastEntityType)
                         .Where(x => x.FKNameChain == node.FKNameChain)
                         .Where(x => x.LastEntityOffsetFromFirstEntity == node.LastEntityOffsetFromFirstEntity)
@@ -3142,7 +3167,7 @@ namespace EFCoreLibrary
                 stringBuilder.Append(".");
             }
 
-            stringBuilder.Append(node.FKName);
+            stringBuilder.Append($"{node.LastNavigationType.Name}_{node.FKName}");
 
             return stringBuilder.ToString();
         }

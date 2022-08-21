@@ -21,7 +21,7 @@ namespace System.Linq
             return expressionIsTrackingGetter.IsTracking(source);
         }
 
-        public static bool GetIsOrderApplied<TEntity>(this IQueryable<TEntity> source)
+        public static bool HasAppliedOrderByOrOrderByDescending<TEntity>(this IQueryable<TEntity> source)
         {
             if (source == null)
             {
@@ -30,10 +30,10 @@ namespace System.Linq
 
             var expressionIsOrderAppliedGetter = new ExpressionIsOrderAppliedGetter();
 
-            return expressionIsOrderAppliedGetter.IsOrderApplied(source);
+            return expressionIsOrderAppliedGetter.HasAppliedOrderByOrOrderByDescending(source);
         }
 
-        public static bool GetIsTakeApplied<TEntity>(this IQueryable<TEntity> source)
+        public static bool HasAppliedTake<TEntity>(this IQueryable<TEntity> source)
         {
             if (source == null)
             {
@@ -42,7 +42,7 @@ namespace System.Linq
 
             var expressionIsTakeAppliedGetter = new ExpressionIsTakeAppliedGetter();
 
-            return expressionIsTakeAppliedGetter.IsTakeApplied(source);
+            return expressionIsTakeAppliedGetter.HasAppliedTake(source);
         }
 
         public static bool IsMissingOrderBeforeTakeOrSkip<TEntity>(this IQueryable<TEntity> source)
@@ -130,7 +130,7 @@ namespace System.Linq
                 }
             }
 
-            public bool IsOrderApplied<TElement>(IQueryable<TElement> queryData)
+            public bool HasAppliedOrderByOrOrderByDescending<TElement>(IQueryable<TElement> queryData)
             {
                 this.Visit(queryData.Expression);
 
@@ -160,7 +160,7 @@ namespace System.Linq
                 }
             }
 
-            public bool IsTakeApplied<TElement>(IQueryable<TElement> queryData)
+            public bool HasAppliedTake<TElement>(IQueryable<TElement> queryData)
             {
                 this.Visit(queryData.Expression);
 
