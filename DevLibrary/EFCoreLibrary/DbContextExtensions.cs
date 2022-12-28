@@ -10,26 +10,26 @@ namespace EFCoreLibrary
 {
     public static class DbContextExtensions
     {
-        #region one way combine
+        #region one way combine, use entity extension so there will be include chain
 
-        public static void LoadNavigations<TEntity, TNavigation>(this DbContext dbContext,
-            TEntity entity,
+        public static List<TNavigation> LoadNavigations<TEntity, TNavigation>(this TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            DbContext dbContext,
             bool isTracking = false)
             where TEntity : class
             where TNavigation : class
         {
             if (entity == null)
             {
-                return;
+                return new List<TNavigation>();
             }
 
-            dbContext.LoadNavigations<TEntity, TNavigation>(new TEntity[] { entity }, navigationPropertyPath, isTracking: isTracking);
+            return new TEntity[] { entity }.LoadNavigations<TEntity, TNavigation>(navigationPropertyPath, dbContext, isTracking: isTracking);
         }
 
-        public static void LoadNavigations<TEntity, TNavigation>(this DbContext dbContext,
-            IEnumerable<TEntity> entities,
+        public static List<TNavigation> LoadNavigations<TEntity, TNavigation>(this IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
+            DbContext dbContext,
             bool isTracking = false,
             bool isOneToOne = false)
             where TEntity : class
@@ -37,7 +37,7 @@ namespace EFCoreLibrary
         {
             if (entities == null || !entities.Any())
             {
-                return;
+                return new List<TNavigation>();
             }
 
             var manualIncludeType = EFManualIncludableQueryableHelper.GetManualIncludeType(navigationPropertyPath, dbContext);
@@ -63,21 +63,49 @@ namespace EFCoreLibrary
                         navigationPropertyPathConverted = Expression.Lambda(delegateType, memberExpression, parameter);
                     }
 
-                    LoadCollectionManyNavigationsMethodInfo
+                    var result = LoadCollectionManyNavigationsMethodInfo
                         .MakeGenericMethod(typeof(TEntity), collectionElementType)
                         .Invoke(null, new object[] { dbContext, entities, navigationPropertyPathConverted, isTracking });
 
-                    break;
+                    return result as List<TNavigation>;
 
                 case EFManualIncludableQueryableHelper.ManualIncludeType.OneToManyUnique:
-                    dbContext.LoadOneToManyUniqueEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking);
-                    break;
+                    return dbContext.LoadOneToManyUniqueEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking);
                 case EFManualIncludableQueryableHelper.ManualIncludeType.ManyToOne:
-                    dbContext.LoadManyToOneEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking, isOneToOne: isOneToOne);
-                    break;
+                    return dbContext.LoadManyToOneEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking, isOneToOne: isOneToOne);
                 default:
                     throw new NotImplementedException();
             }
+        }
+
+        public static List<TNavigation> LoadNavigationCollection<TEntity, TNavigation>(this TEntity entity,
+            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
+            DbContext dbContext,
+            bool isTracking = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entity == null)
+            {
+                return new List<TNavigation>();
+            }
+
+            return dbContext.LoadManyNavigations(entity, navigationPropertyPath, isTracking: isTracking);
+        }
+
+        public static List<TNavigation> LoadNavigationCollection<TEntity, TNavigation>(this IEnumerable<TEntity> entities,
+            Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
+            DbContext dbContext,
+            bool isTracking = false)
+            where TEntity : class
+            where TNavigation : class
+        {
+            if (entities == null || !entities.Any())
+            {
+                return new List<TNavigation>();
+            }
+
+            return dbContext.LoadManyNavigations(entities, navigationPropertyPath, isTracking: isTracking);
         }
 
         #endregion
@@ -534,6 +562,24 @@ namespace EFCoreLibrary
         }
 
         #endregion
+
+        public static int GetSingleIntegerKeyValue<T>(this DbContext dbContext, T entity)
+        {
+            var keyName = dbContext.Model.FindEntityType(typeof(T)).FindPrimaryKey().Properties
+                .Select(x => x.Name)
+                .Single();
+
+            return (int)entity.GetType().GetProperty(keyName).GetValue(entity, null);
+        }
+
+        public static Expression<Func<T, int>> GetSingleIntegerKeySelector<T>(this DbContext dbContext)
+        {
+            var keyName = dbContext.Model.FindEntityType(typeof(T)).FindPrimaryKey().Properties
+                .Select(x => x.Name)
+                .Single();
+
+            return GetPropertySelector<T, int>(keyName);
+        }
 
         private static PropertyInfo GetPropertyInfo<TSource, TProperty>(this Expression<Func<TSource, TProperty>> propertyLambda)
         {
