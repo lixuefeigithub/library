@@ -28,7 +28,6 @@ namespace LinqLibrary
         /// <param name="rightQuery">
         /// A query on the right side of a left join query transaction
         /// Do not Add selector to inner query. just use the entity query.
-        /// Like _dbContext.Users.AsQueryable() is good, _dbContext.Users.AsQueryable().Select(x => new {x.UserId, x.Name }) is bad
         /// The selectors in inner query cannot be translated, it's good enough to add all your selectors to resultSelector.
         /// </param>
         /// <param name="leftQueryKeySelector">
@@ -87,7 +86,6 @@ namespace LinqLibrary
         /// <param name="rightQuery">
         /// A query on the right side of a left join query transaction
         /// Do not Add selector to inner query. just use the entity query.
-        /// Like _dbContext.Users.AsQueryable() is good, _dbContext.Users.AsQueryable().Select(x => new {x.UserId, x.Name }) is bad
         /// The selectors in inner query cannot be translated, it's good enough to add all your selectors to resultSelector.
         /// </param>
         /// <param name="leftQueryKeySelector">
