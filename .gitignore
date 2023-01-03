@@ -11,3 +11,7 @@
 /DevLibrary/.vs/*
 /DevLibrary/DevLibrary/bin/*
 /DevLibrary/DevLibrary/obj/*
+/DevLibrary/ManualIncludableQueryable/bin/*
+/DevLibrary/ManualIncludableQueryable/obj/*
+/DevLibrary/ManualIncludableQueryable.UnitTest/bin/*
+/DevLibrary/ManualIncludableQueryable.UnitTest/obj/*

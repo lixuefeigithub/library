@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using ManualIncludableQueryable;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -6,13 +7,13 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 
-namespace EFCoreLibrary
+namespace ManualIncludableQueryable
 {
     public static class DbContextExtensions
     {
         #region one way combine, use entity extension so there will be include chain
 
-        public static List<TNavigation> LoadNavigations<TEntity, TNavigation>(this TEntity entity,
+        public static TNavigation LoadNavigation<TEntity, TNavigation>(this TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isTracking = false)
@@ -21,13 +22,15 @@ namespace EFCoreLibrary
         {
             if (entity == null)
             {
-                return new List<TNavigation>();
+                return default(TNavigation);
             }
 
-            return new TEntity[] { entity }.LoadNavigations<TEntity, TNavigation>(navigationPropertyPath, dbContext, isTracking: isTracking);
+            var result = new TEntity[] { entity }.LoadNavigation<TEntity, TNavigation>(navigationPropertyPath, dbContext, isTracking: isTracking);
+
+            return result.FirstOrDefault();
         }
 
-        public static List<TNavigation> LoadNavigations<TEntity, TNavigation>(this IEnumerable<TEntity> entities,
+        public static List<TNavigation> LoadNavigation<TEntity, TNavigation>(this IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isTracking = false,
@@ -112,7 +115,7 @@ namespace EFCoreLibrary
 
         #region 2 ways with return value
 
-        public static TNavigation LoadOneNavigation<TEntity, TNavigation>(this DbContext dbContext,
+        private static TNavigation LoadOneNavigation<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false)
@@ -129,7 +132,7 @@ namespace EFCoreLibrary
             return result?.FirstOrDefault();
         }
 
-        public static List<TNavigation> LoadOneNavigations<TEntity, TNavigation>(this DbContext dbContext,
+        private static List<TNavigation> LoadOneNavigations<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             bool isTracking = false,
@@ -162,7 +165,16 @@ namespace EFCoreLibrary
             .GetDeclaredMethods(nameof(LoadManyNavigations))
             .Single(x => IsIEnumerable(x.GetParameters()[1].ParameterType));
 
-        public static List<TNavigation> LoadManyNavigations<TEntity, TNavigation>(this DbContext dbContext,
+        /// <summary>
+        /// Ex. _dbContext.LoadOneToManyEntities(product, x => x.ProductPrices)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entity"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
+        private static List<TNavigation> LoadManyNavigations<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
             bool isTracking = false)
@@ -177,7 +189,16 @@ namespace EFCoreLibrary
             return dbContext.LoadOneToManyEntities<TEntity, TNavigation>(entity, navigationPropertyPath, isTracking: isTracking);
         }
 
-        public static List<TNavigation> LoadManyNavigations<TEntity, TNavigation>(this DbContext dbContext,
+        /// <summary>
+        /// Ex. _dbContext.LoadOneToManyEntities(products, x => x.ProductPrices)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entities"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
+        private static List<TNavigation> LoadManyNavigations<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
             bool isTracking = false)
@@ -191,6 +212,15 @@ namespace EFCoreLibrary
 
         #region original 3 ways
 
+        /// <summary>
+        /// Ex. _dbContext.LoadOneToManyEntities(product, x => x.ProductPrices)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entity"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
         private static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
@@ -206,6 +236,15 @@ namespace EFCoreLibrary
             return dbContext.LoadOneToManyEntities<TEntity, TNavigation>(new TEntity[] { entity }, navigationPropertyPath, isTracking: isTracking);
         }
 
+        /// <summary>
+        /// Ex. _dbContext.LoadOneToManyEntities(products, x => x.ProductPrices)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entities"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
         private static List<TNavigation> LoadOneToManyEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, IEnumerable<TNavigation>>> navigationPropertyPath,
@@ -308,6 +347,15 @@ namespace EFCoreLibrary
             return allNavigationEntities;
         }
 
+        /// <summary>
+        /// Ex. _dbContext.LoadManyToOneEntities(productPrice, x => x.Product)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entity"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
         private static TNavigation LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
@@ -329,6 +377,15 @@ namespace EFCoreLibrary
             return result?.FirstOrDefault();
         }
 
+        /// <summary>
+        /// Ex. _dbContext.LoadManyToOneEntities(productPrices, x => x.Product)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entities"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
         private static List<TNavigation> LoadManyToOneEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
@@ -359,6 +416,7 @@ namespace EFCoreLibrary
 
             var navigationForeignKey = navigation.ForeignKey;
 
+            //ProductPrice.ProductId
             if (navigation.ForeignKey.Properties.Count != 1)
             {
                 throw new NotImplementedException("No FK or more than one FK column");
@@ -385,6 +443,15 @@ namespace EFCoreLibrary
 
             var keyValues = keyValuesQuery.ToList();
 
+            ////Product.ProductPrices
+            //var inverseCollectionProperty = navigationForeignKey.DependentToPrincipal;
+
+            //var inverseCollectionPropertyInfo = inverseCollectionProperty.PropertyInfo;
+
+            ////ProductId
+            //var ProductId = navigationForeignKeyProperty.Name;
+
+            //Product.ProductId
             if (navigationForeignKey.PrincipalKey.Properties.Count != 1)
             {
                 throw new NotImplementedException("No PK or more than one PK column");
@@ -397,6 +464,7 @@ namespace EFCoreLibrary
                 throw new NotImplementedException("method not support for many to many relationship");
             }
 
+            //ProductId
             var pkName = pkProperty.Name;
 
             var filterPropertyExpression = GetPropertySelector<TNavigation>(pkName);
@@ -435,6 +503,16 @@ namespace EFCoreLibrary
             return navigationEntities;
         }
 
+        /// <summary>
+        /// A one-to-many relationship with unique index 
+        /// Ex. _dbContext.LoadOneToManyEntities(ClientUser, x => x.ClientUserProfile)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entities"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
         private static TNavigation LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
             TEntity entity,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
@@ -454,6 +532,16 @@ namespace EFCoreLibrary
             return result?.FirstOrDefault();
         }
 
+        /// <summary>
+        /// A one-to-many relationship with unique index 
+        /// Ex. _dbContext.LoadOneToManyEntities(ClientUser, x => x.ClientUserProfile)
+        /// </summary>
+        /// <typeparam name="TEntity"></typeparam>
+        /// <typeparam name="TNavigation"></typeparam>
+        /// <param name="dbContext"></param>
+        /// <param name="entities"></param>
+        /// <param name="navigationPropertyPath"></param>
+        /// <param name="isTracking"></param>
         private static List<TNavigation> LoadOneToManyUniqueEntities<TEntity, TNavigation>(this DbContext dbContext,
             IEnumerable<TEntity> entities,
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
@@ -697,6 +785,18 @@ namespace EFCoreLibrary
             var call = Expression.Call(containsMethod, collection, expression.Body);
 
             return Expression.Lambda(call, pe);
+        }
+
+        private static bool IsICollection(Type type)
+        {
+            if (type == null)
+            {
+                throw new ArgumentNullException(nameof(type));
+            }
+
+            return type.GetInterfaces()
+                            .Any(x => x.IsGenericType &&
+                            x.GetGenericTypeDefinition() == typeof(ICollection<>));
         }
 
         private static bool IsIEnumerable(Type type)

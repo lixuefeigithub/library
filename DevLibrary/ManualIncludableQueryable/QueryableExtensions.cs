@@ -5,7 +5,7 @@ using System.Linq.Expressions;
 
 namespace System.Linq
 {
-    public static class QueryableExtensions
+    public static partial class QueryableExtensions
     {
         public static bool GetIsTracking<TEntity>(this IQueryable<TEntity> source, DbContext dbContext)
         {

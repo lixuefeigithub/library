@@ -7,7 +7,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 
-namespace EFCoreLibrary
+namespace ManualIncludableQueryable
 {
     #region node (single chain)
 

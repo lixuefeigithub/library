@@ -141,6 +141,38 @@ namespace LinqLibrary
             return source.Where(orCondition);
         }
 
+        #region Filter/Sorter
+
+        public static int PageSize { get; set; } = 10;
+
+        public static IQueryable<TSource> TakeSafe<TSource>(this IQueryable<TSource> source, int? truncateSize)
+        {
+            if (truncateSize.HasValue)
+            {
+                return source.Take(truncateSize.Value);
+            }
+            else
+            {
+                return source;
+            }
+        }
+
+        public static IQueryable<T> Page<T>(this IQueryable<T> source, int? page, int? pageSize = null)
+        {
+            if (page == null)
+            {
+                return source;
+            }
+
+            pageSize = pageSize ?? PageSize;
+
+            return source
+                .Skip((page.Value - 1) * pageSize.Value)
+                .Take(pageSize.Value);
+        }
+
+        #endregion
+
         public class LeftJoinResult<TLeftOuter, TRightInner>
         {
             public TLeftOuter LeftOuter { get; set; }
