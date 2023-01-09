@@ -332,7 +332,14 @@ namespace ManualIncludableQueryable
                 }
             }
 
+
+            //For now one to many cannot have duplicated items, unless the upper level entities has the duplicated items
+            //Because it cannot have one TNavigation linked to two TEntity at the same time
+            //Unless the caller write an inefficient query with duplicated items, there should not be a problem
+
+            /*
             Expression<Func<TLastNavigation, TLastNavigation, bool>> compareExpression = null;
+            Expression<Func<TLastNavigation, TLastNavigation, bool>> defaultCompareExpression = (x, y) => x == y;
 
             foreach (var selector in navigationPKSelectors)
             {
@@ -343,9 +350,12 @@ namespace ManualIncludableQueryable
                     : ManualIncludableQueryableHelper.And(compareExpression, compareExpressionCurrent);
             }
 
-            var compareFunc = compareExpression.Compile();
+            var compareFunc = (compareExpression ?? defaultCompareExpression).Compile();
 
             IEqualityComparer<TLastNavigation> comparer = new ManualIncludableQueryableHelper.LambdaComparer<TLastNavigation>(compareFunc);
+
+            return result.Distinct(comparer).ToList();
+            */
 
             return result;
         }
@@ -2317,19 +2327,6 @@ namespace ManualIncludableQueryable
                 isInvokeDistinctInMemory: isInvokeDistinctInMemory);
 
             return new EFOrderedManualIncludableQueryable<TEntity, TNavigation>(newManualQueryable, this._orderedQueryable);
-        }
-
-        /// <summary>
-        /// Old one-to-one
-        /// </summary>
-        /// <typeparam name="TNewNavigation"></typeparam>
-        /// <param name="navigationPropertyPath"></param>
-        /// <returns></returns>
-        public EFManualIncludableQueryable<TEntity, TNewNavigation> CreateNewOneToManyIncludeChainQuery<TNewNavigation>(
-            Expression<Func<TEntity, IEnumerable<TNewNavigation>>> navigationPropertyPath)
-            where TNewNavigation : class
-        {
-            return this.CreateNewOneToManyIncludeChainQuery(navigationPropertyPath);
         }
 
         public EFManualIncludableQueryable<TEntity, TNewNavigation> CreateNewOneToManyUniqueIncludeChainQuery<TNewNavigation>(
