@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Linq.Dynamic.Core;
+using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace WinFormLibrary
@@ -17,15 +19,90 @@ namespace WinFormLibrary
                 return;
             }
 
-            var targetColumn = dataGridView.Columns[currentSortColumnIndex];
+            var sortInfo = dataGridView.GetSortInfo<T>(currentSortColumnIndex);
 
-            if (targetColumn.SortMode == DataGridViewColumnSortMode.NotSortable)
+            if (sortInfo == null)
             {
                 return;
             }
 
-            var originalSortColumnIndex = dataGridView.GetSortColumnIndex();
-            var originalSortColumnDirection = dataGridView.GetSortColumnDirection();
+            dataGridView.DataSource = (dataGridView.DataSource as IEnumerable)?
+                .AsQueryable()
+                .OrderBy($"{sortInfo.SortColumnPropertyName} {sortInfo.SortOrder}")
+                .ToDynamicList<T>();
+        }
+
+        public static async Task SortAsync<T>(this DataGridView dataGridView, int currentSortColumnIndex)
+        {
+            if (dataGridView == null)
+            {
+                return;
+            }
+
+            var sortInfo = dataGridView.GetSortInfo<T>(currentSortColumnIndex);
+
+            if (sortInfo == null)
+            {
+                return;
+            }
+
+            var sourceData = (dataGridView.DataSource as IEnumerable)?
+                .AsQueryable();
+
+            if (sourceData == null)
+            {
+                return;
+            }
+
+            dataGridView.DataSource = await Task.Run(() =>
+            {
+                return sourceData
+                .OrderBy($"{sortInfo.SortColumnPropertyName} {sortInfo.SortOrder}")
+                .ToDynamicList<T>();
+            });
+        }
+
+        public static async Task SortAsync<T>(this DataGridView dataGridView, int currentSortColumnIndex, UserControlPageNavigator pageNavigator)
+        {
+            if (dataGridView == null)
+            {
+                return;
+            }
+
+            var sortInfo = dataGridView.GetSortInfo<T>(currentSortColumnIndex);
+
+            if (sortInfo == null)
+            {
+                return;
+            }
+
+            var sortAttribute = sortInfo?.SortColumnPropertyInfo?.GetCustomAttribute<SortFieldAttribute>();
+
+            var sortField = sortAttribute?.SortFieldName ?? sortInfo?.SortColumnPropertyName;
+            var sortOrder = sortInfo?.SortOrder;
+
+            //sort info changed, need to back to first page
+            await pageNavigator.DoLoadPage(1, sortField, sortOrder);
+        }
+
+        private static SortInfo GetSortInfo<T>(this DataGridView dataGridView, int currentSortColumnIndex)
+        {
+            if (dataGridView == null)
+            {
+                return null;
+            }
+
+            var targetColumn = dataGridView.Columns[currentSortColumnIndex];
+
+            if (targetColumn.SortMode == DataGridViewColumnSortMode.NotSortable)
+            {
+                return null;
+            }
+
+            var sortValue = _sortTableFields.GetOrCreateValue(dataGridView);
+
+            var originalSortColumnIndex = sortValue.SortColumnIndex;
+            var originalSortColumnDirection = sortValue.SortColumnDirection;
 
             ListSortDirection currentSortColumnDirection = ListSortDirection.Ascending;
 
@@ -41,15 +118,17 @@ namespace WinFormLibrary
                 }
             }
 
-            dataGridView.SetSortColumnIndex(currentSortColumnIndex);
-            dataGridView.SetSortColumnDirection(currentSortColumnDirection);
+            sortValue.SortColumnIndex = currentSortColumnIndex;
+            sortValue.SortColumnDirection = currentSortColumnDirection;
 
-            var direction = currentSortColumnDirection == ListSortDirection.Descending ? " desc" : string.Empty;
+            var dataPropertyName = dataGridView.Columns[currentSortColumnIndex].DataPropertyName;
 
-            dataGridView.DataSource = (dataGridView.DataSource as IEnumerable)?
-                .AsQueryable()
-                .OrderBy($"{targetColumn.Name}{direction}")
-                .ToDynamicList<T>();
+            var dataProperty = typeof(T).GetProperty(dataPropertyName, BindingFlags.IgnoreCase | BindingFlags.Instance | BindingFlags.Public);
+
+            sortValue.SortColumnPropertyName = dataPropertyName;
+            sortValue.SortColumnPropertyInfo = dataProperty;
+
+            return sortValue;
         }
 
         public static List<T> GetSelectedRowItems<T>(this DataGridView dataGridView)
@@ -92,33 +171,20 @@ namespace WinFormLibrary
             return new List<T>();
         }
 
-        private static readonly ConditionalWeakTable<DataGridView, SortField> _sortTableFields =
-             new ConditionalWeakTable<DataGridView, SortField>();
+        private static readonly ConditionalWeakTable<DataGridView, SortInfo> _sortTableFields =
+             new ConditionalWeakTable<DataGridView, SortInfo>();
 
-        private static int GetSortColumnIndex(this DataGridView dataGridView)
-        {
-            return _sortTableFields.GetOrCreateValue(dataGridView).SortColumnIndex;
-        }
-
-        private static void SetSortColumnIndex(this DataGridView dataGridView, int value)
-        {
-            _sortTableFields.GetOrCreateValue(dataGridView).SortColumnIndex = value;
-        }
-
-        private static ListSortDirection GetSortColumnDirection(this DataGridView dataGridView)
-        {
-            return _sortTableFields.GetOrCreateValue(dataGridView).SortColumnDirection;
-        }
-
-        private static void SetSortColumnDirection(this DataGridView dataGridView, ListSortDirection value)
-        {
-            _sortTableFields.GetOrCreateValue(dataGridView).SortColumnDirection = value;
-        }
-
-        class SortField
+        class SortInfo
         {
             public int SortColumnIndex { get; set; } = -1;
+
             public ListSortDirection SortColumnDirection { get; set; } = ListSortDirection.Ascending;
+
+            public string SortOrder => SortColumnDirection == ListSortDirection.Descending ? "desc" : string.Empty;
+
+            public string SortColumnPropertyName { get; set; }
+
+            public PropertyInfo SortColumnPropertyInfo { get; set; }
         }
     }
 }
