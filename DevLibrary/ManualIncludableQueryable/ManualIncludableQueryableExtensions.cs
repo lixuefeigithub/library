@@ -56,7 +56,7 @@
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TNavigation : class
         {
@@ -69,7 +69,7 @@
                 navigationPropertyPath,
                 dbContext,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -78,7 +78,7 @@
             this IManualIncludableQueryable<TEntity> source,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TNewNavigation : class
         {
@@ -89,7 +89,7 @@
 
             var includableQuery = source.CreateNewIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -98,7 +98,7 @@
             this IManualIncludableQueryable<TEntity, TLastNavigation> source,
             Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TLastNavigation : class
             where TNewNavigation : class
@@ -110,7 +110,7 @@
 
             var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -119,7 +119,7 @@
             this IManualIncludableQueryable<TEntity, IEnumerable<TLastNavigation>> source,
             Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TLastNavigation : class
             where TNewNavigation : class
@@ -131,7 +131,7 @@
 
             var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -142,7 +142,7 @@
             Expression<Func<TEntity, TNavigation>> navigationPropertyPath,
             DbContext dbContext,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TNavigation : class
         {
@@ -155,7 +155,7 @@
                 navigationPropertyPath,
                 dbContext,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -164,7 +164,7 @@
             this IOrderedManualIncludableQueryable<TEntity> source,
             Expression<Func<TEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TNewNavigation : class
         {
@@ -175,7 +175,7 @@
 
             var includableQuery = source.CreateNewIncludeChainQuery<TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -184,7 +184,7 @@
             this IOrderedManualIncludableQueryable<TEntity, TLastNavigation> source,
             Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TLastNavigation : class
             where TNewNavigation : class
@@ -196,7 +196,7 @@
 
             var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }
@@ -205,7 +205,7 @@
             this IOrderedManualIncludableQueryable<TEntity, IEnumerable<TLastNavigation>> source,
             Expression<Func<TLastNavigation, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TEntity : class
             where TLastNavigation : class
             where TNewNavigation : class
@@ -217,7 +217,7 @@
 
             var includableQuery = source.CreateThenIncludeQuery<TLastNavigation, TNewNavigation>(navigationPropertyPath,
                 isOneToOne: isOneToOne,
-                isInvokeDistinctInMemory: isInvokeDistinctInMemory);
+                isReGenerateNavigationQueryByPkOrFk: isReGenerateNavigationQueryByPkOrFk);
 
             return includableQuery;
         }

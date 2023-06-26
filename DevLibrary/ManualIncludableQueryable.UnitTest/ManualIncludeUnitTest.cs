@@ -393,7 +393,7 @@ namespace ManualIncludableQueryable.UnitTest
                     .Take(100);
 
                 var clientUsers = clientUserQuery
-                    .IncludeManually(x => x.ContactPhoneNumbers, _dbContext, isInvokeDistinctInMemory: true)
+                    .IncludeManually(x => x.ContactPhoneNumbers, _dbContext, isReGenerateNavigationQueryByPkOrFk: true)
                     .ToList();
 
                 if (_dbContext.ChangeTracker.Entries().Any())
@@ -461,7 +461,7 @@ namespace ManualIncludableQueryable.UnitTest
                 var clientUsers = clientUserQuery
                     .OrderBy(x => x.ClientUserId)
                     .Take(100)
-                    .IncludeManually(x => x.ContactPhoneNumbers, _dbContext, isInvokeDistinctInMemory: true)
+                    .IncludeManually(x => x.ContactPhoneNumbers, _dbContext, isReGenerateNavigationQueryByPkOrFk: true)
                     .ToList();
 
                 var trackedEntitiesActual = _dbContext.ChangeTracker.Entries().Count();

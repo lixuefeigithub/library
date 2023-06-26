@@ -19,6 +19,8 @@ namespace ManualIncludableQueryable
 
         bool IsOneToOne { get; }
 
+        bool IsReGenerateNavigationQueryByPkOrFk { get; }
+
         string NavigationPropertyName { get; }
 
         IQueryable BuildNavigationQueryNoType(IQueryable sourceQuery, bool isUseJoin);
@@ -163,12 +165,12 @@ namespace ManualIncludableQueryable
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="navigationPropertyPath">Expression<Func<TEntity, TNewNavigation>></param>
         /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
+        /// <param name="isReGenerateNavigationQueryByPkOrFk"></param>
         /// <returns></returns>
         IManualIncludableQueryable<TEntity, TNewNavigation> CreateNewIncludeChainQuery<TNewNavigation>(
             LambdaExpression navigationPropertyPath,
             bool isOneToOne,
-            bool isInvokeDistinctInMemory)
+            bool isReGenerateNavigationQueryByPkOrFk)
             where TNewNavigation : class;
     }
 
@@ -178,7 +180,7 @@ namespace ManualIncludableQueryable
     {
         IManualIncludableQueryable<TEntity, TNewNavigation> CreateThenIncludeQuery<TPreviousNavigationEntity, TNewNavigation>(Expression<Func<TPreviousNavigationEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TPreviousNavigationEntity : class
             where TNewNavigation : class;
     }
@@ -196,12 +198,12 @@ namespace ManualIncludableQueryable
         /// <typeparam name="TNewNavigation"></typeparam>
         /// <param name="navigationPropertyPath">Expression<Func<TEntity, TNewNavigation>></param>
         /// <param name="isOneToOne"></param>
-        /// <param name="isInvokeDistinctInMemory"></param>
+        /// <param name="isReGenerateNavigationQueryByPkOrFk"></param>
         /// <returns></returns>
         new IOrderedManualIncludableQueryable<TEntity, TNewNavigation> CreateNewIncludeChainQuery<TNewNavigation>(
             LambdaExpression navigationPropertyPath,
             bool isOneToOne,
-            bool isInvokeDistinctInMemory)
+            bool isReGenerateNavigationQueryByPkOrFk)
             where TNewNavigation : class;
     }
 
@@ -211,7 +213,7 @@ namespace ManualIncludableQueryable
     {
         IOrderedManualIncludableQueryable<TEntity, TNewNavigation> CreateThenIncludeQuery<TPreviousNavigationEntity, TNewNavigation>(Expression<Func<TPreviousNavigationEntity, TNewNavigation>> navigationPropertyPath,
             bool isOneToOne = false,
-            bool isInvokeDistinctInMemory = false)
+            bool isReGenerateNavigationQueryByPkOrFk = false)
             where TPreviousNavigationEntity : class
             where TNewNavigation : class;
     }
