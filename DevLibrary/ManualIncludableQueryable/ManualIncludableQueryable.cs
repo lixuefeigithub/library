@@ -984,6 +984,8 @@ namespace ManualIncludableQueryable
 
             public string FKNameChain { get; set; }
 
+            public string NavigationPropertyName { get; set; }
+
             public int LastEntityOffsetFromFirstEntity { get; set; }
 
             public IEnumerable<object> LoadedNavigations { get; set; } = new List<object>();

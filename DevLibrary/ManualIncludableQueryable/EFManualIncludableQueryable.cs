@@ -2052,6 +2052,7 @@ namespace ManualIncludableQueryable
                         LastEntityOffsetFromFirstEntity = oneToOneNode.LastEntityOffsetFromFirstEntity,
                         FKName = oneToOneNode.FKName,
                         FKNameChain = oneToOneNode.FKNameChain,
+                        NavigationPropertyName = oneToOneNode.NavigationPropertyName,
                         LoadedNavigations = loadedNavigationsCurrentLevel.ToList(),
                         CurrentQuery = currentQuery,
                     });
@@ -2094,6 +2095,8 @@ namespace ManualIncludableQueryable
                     var sameNavigationLoaded = loadedNavigations
                         .Where(x => x.LastEntityType == node.LastEntityType)
                         .Where(x => x.FKNameChain == node.FKNameChain)
+                        //For self-table reference
+                        .Where(x => x.NavigationPropertyName == node.NavigationPropertyName)
                         .Where(x => x.LastEntityOffsetFromFirstEntity == node.LastEntityOffsetFromFirstEntity)
                         .FirstOrDefault();
 
@@ -2927,6 +2930,7 @@ namespace ManualIncludableQueryable
                 LastEntityOffsetFromFirstEntity = node.LastEntityOffsetFromFirstEntity,
                 FKName = node.FKName,
                 FKNameChain = node.FKNameChain,
+                NavigationPropertyName = node.NavigationPropertyName,
                 LoadedNavigations = result.Navigations,
                 CurrentQuery = originalNavigationQuery,
             });
@@ -2950,6 +2954,7 @@ namespace ManualIncludableQueryable
                         LastEntityOffsetFromFirstEntity = oneToOneNode.LastEntityOffsetFromFirstEntity,
                         FKName = oneToOneNode.FKName,
                         FKNameChain = oneToOneNode.FKNameChain,
+                        NavigationPropertyName = oneToOneNode.NavigationPropertyName,
                         LoadedNavigations = loadedNavigationsCurrentLevel.ToList(),
                         CurrentQuery = currentLevelQuery,
                     });
