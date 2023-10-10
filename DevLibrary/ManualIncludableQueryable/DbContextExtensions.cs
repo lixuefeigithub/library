@@ -70,7 +70,14 @@ namespace ManualIncludableQueryable
                         .MakeGenericMethod(typeof(TEntity), collectionElementType)
                         .Invoke(null, new object[] { dbContext, entities, navigationPropertyPathConverted, isTracking });
 
-                    return result as List<TNavigation>;
+                    var resultConverted = result as TNavigation;
+
+                    if (resultConverted == null)
+                    {
+                        return null;
+                    }
+
+                    return new List<TNavigation> { resultConverted };
 
                 case EFManualIncludableQueryableHelper.ManualIncludeType.OneToManyUnique:
                     return dbContext.LoadOneToManyUniqueEntities<TEntity, TNavigation>(entities, navigationPropertyPath, isTracking: isTracking);
