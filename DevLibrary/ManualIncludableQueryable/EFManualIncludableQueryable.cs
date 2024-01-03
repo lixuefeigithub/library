@@ -255,7 +255,7 @@ namespace ManualIncludableQueryable
 
             if (isNeedToOverwriteQuery)
             {
-                var allFKKeys = entities.Select(_pkSelector).ToList();
+                var allFKKeys = entities.Select(_pkSelector).Distinct().ToList();
 
                 var notLoadedFKKeys = new List<object>();
 
@@ -640,7 +640,7 @@ namespace ManualIncludableQueryable
 
             if (isNeedToOverwriteQuery)
             {
-                var allFKKeys = entities.Select(_pkSelector).ToList();
+                var allFKKeys = entities.Select(_pkSelector).Distinct().ToList();
 
                 var notLoadedFKKeys = new List<object>();
 
@@ -875,7 +875,7 @@ namespace ManualIncludableQueryable
                 navigationQuery = sourceQueryFiltered.Select(_navigationPropertySelector);
             }
 
-            if (!_isOneToOne && !_isReGenerateNavigationQueryByPkOrFk)
+            if (!_isOneToOne)
             {
                 navigationQuery = navigationQuery.Distinct();
             }
